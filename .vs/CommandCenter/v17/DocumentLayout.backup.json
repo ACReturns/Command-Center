@@ -1,0 +1,37 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\viewmodel\\buildselection.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:viewmodel\\buildselection.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "BuildSelection.cs",
+              "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
+              "RelativeDocumentMoniker": "ViewModel\\BuildSelection.cs",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
+              "RelativeToolTip": "ViewModel\\BuildSelection.cs",
+              "ViewState": "AgIAABkAAAAAAAAAAAAlwCsAAABBAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-12T18:22:40.633Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

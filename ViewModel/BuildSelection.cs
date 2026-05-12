@@ -27,30 +27,29 @@ namespace CommandCenter.ViewModel
         private string _currentBuildPath = "Current Build Path...";
         private string _newBuildPath = "New Build Path...";
         private string _newPatchPath = "New Patch Path...";
-        private string _selectedServer = "Test 1";
-        private List<string> _servers = [];
+        
+        static Dictionary<string, string> ServerPaths = new Dictionary<string, string>
+        {
+            {"Test 1", "GameLaunching 34.217.160.238 8484"},
+            {"Test 2", "GameLaunching 52.43.197.199 8484"},
+            {"Test 3", "GameLaunching 54.148.16.230 8484"},
+            {"Test 4", "GameLaunching 54.148.59.7 8484"},
+            {"Test 6", "GameLaunching 52.89.167.110 8484"},
+            {"Staging (EU)", "GameLaunching 3.77.198.24 8484"},
+            {"Staging 1 (NA)", "Gamelaunching 44.234.170.29 8484"},
+            {"Staging 2 (NA)", "Gamelaunching 44.234.182.79 8484"}
+        };
+
+        private List<string> _servers = ServerPaths.Keys.ToList();
+        private string _selectedServer = ServerPaths.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
         
         public List<string> Servers
         {
-            get 
-            {
-                string[] serverFiles = Directory.GetFiles(@"C:\Users\dosmith\Desktop\MapleStory", "*.bat");
-
-                // Verify its empty before adding to avoid duplicates, this allows for dynamic adding of servers without having to restart the program to update the dropdown
-                if (_servers.Count == 0)
-                {
-                    foreach (string file in serverFiles)
-                    {
-                        _servers.Add(Path.GetFileName(file));
-                    }
-                }
-
-                return new List<string>(_servers); 
-            }
+            get { return _servers; }
             set { _servers = value; }
         }
-        
+
         public string CurrentBuildPath 
         {
             get { return _currentBuildPath; }

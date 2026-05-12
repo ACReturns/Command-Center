@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\dosmith\\Desktop\\Visual Studio\\CommandCenter\\CommandCenter.csproj": {}
+    "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj": {}
   },
   "projects": {
-    "C:\\Users\\dosmith\\Desktop\\Visual Studio\\CommandCenter\\CommandCenter.csproj": {
+    "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\dosmith\\Desktop\\Visual Studio\\CommandCenter\\CommandCenter.csproj",
+        "projectUniqueName": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj",
         "projectName": "CommandCenter",
-        "projectPath": "C:\\Users\\dosmith\\Desktop\\Visual Studio\\CommandCenter\\CommandCenter.csproj",
+        "projectPath": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj",
         "packagesPath": "C:\\Users\\dosmith\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\dosmith\\Desktop\\Visual Studio\\CommandCenter\\obj\\",
+        "outputPath": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\dosmith\\AppData\\Roaming\\NuGet\\NuGet.Config",
