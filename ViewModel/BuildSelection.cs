@@ -115,7 +115,6 @@ namespace CommandCenter.ViewModel
             PatchUpdateCommand = new RelayCommand(ExecuteUpdateAction, CanExecuteSelectBuildAction);
             LaunchBuildCommand = new RelayCommand(ExecuteLaunchBuildAction, CanExecuteSelectBuildAction);
             ExtractCommand = new RelayCommand(ExecuteExtractAction, CanExecuteSelectBuildAction);
-            //InitializeServers();
         }
 
         private void ExecuteSelectBuildAction(object obj)
@@ -149,89 +148,6 @@ namespace CommandCenter.ViewModel
             if (result == true)
             {
                 NewPatchPath = dialog.FileName;
-            }
-        }
-
-        private void ExecuteLaunchBuildAction(object obj)
-        {
-            ServerSelection();
-
-            // Launch Build
-            
-            Process process = new Process();
-            process.StartInfo.WorkingDirectory = Path.GetDirectoryName(SelectedServer);
-            process.StartInfo.FileName = SelectedServer;
-
-
-            //Optional: Hide the window and redirect output
-            process.StartInfo.CreateNoWindow = true;
-            process.StartInfo.UseShellExecute = false;
-            process.StartInfo.RedirectStandardOutput = true; 
-
-            try
-            {
-                Process.Start(SelectedServer);
-            }
-            catch (IOException ex)
-            {
-                Console.WriteLine($"Error moving {SelectedServer}: {ex.Message}");
-            }
-        }
-
-        private void ServerSelection()
-        {
-            // Get server selection from dropdown
-            var serverChoice = SelectedServer.Replace(" ", "");
-
-            // Get batch file to launch server
-            string[] serverFiles = Directory.GetFiles(@"C:\Users\dosmith\Desktop\MapleStory", "*.bat");
-            List<string> testServers = [];
-            List<string> stagingServers = [];
-
-            foreach (string file in serverFiles)
-            {
-                if (file.Contains("Staging"))
-                {
-                    stagingServers.Add(file);
-                }
-                else if (file.Contains("Test"))
-                {
-                    testServers.Add(file);
-                }
-            }
-
-            // Set server launch batch path
-            if (serverChoice.Contains("Staging"))
-            {
-                foreach (string server in stagingServers)
-                {
-                    if (serverChoice.Contains("EU") && server.Contains("EU"))
-                    {
-                        serverChoice = server;
-                        break;
-                    }
-                    else if (serverChoice.Contains("2") && server.Contains("2"))
-                    {
-                        serverChoice = server;
-                        break;
-                    }
-                    else if (serverChoice.Contains("NA") && server.Contains("NA") && !server.Contains("2"))
-                    {
-                        serverChoice = server;
-                        break;
-                    }
-                }
-            }
-            else if (serverChoice.Contains("Test"))
-            {
-                foreach (string server in testServers)
-                {
-                    if (server.Contains(serverChoice))
-                    {
-                        SelectedServer = server;
-                        break;
-                    }
-                }
             }
         }
 
@@ -278,6 +194,60 @@ namespace CommandCenter.ViewModel
         {
             // Return false to automatically disable the button
             return true;
+        }
+
+        private void ExecuteLaunchBuildAction(object obj)
+        {
+            if (!Path.Exists(CurrentBuildPath))
+            {
+                MessageBox.Show("Please set a valid build directory to launch a build from then try again");
+                return;
+            }
+            //ServerSelection();
+
+            // Launch Build
+            var launchInfo = new ProcessStartInfo("MapleStoryA.exe");
+            
+
+            Process process = new Process();
+            string launchServer = "0.0.0.0";
+
+            // Set the server to utilize
+            foreach (KeyValuePair<string, string> entry in ServerPaths)
+            {
+                if (entry.Key == SelectedServer)
+                {
+                    launchServer = entry.Value;
+                    break;
+                }
+            }
+            
+            process.StartInfo.WorkingDirectory = CurrentBuildPath;
+            process.StartInfo.FileName = "MapleStoryA.exe";
+            process.StartInfo.Arguments = launchServer + " -w";
+
+            process.StartInfo.Verb = "runas";
+            process.StartInfo.WindowStyle = ProcessWindowStyle.Normal;
+
+            //Optional: Hide the window and redirect output
+            process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.UseShellExecute = true;
+            process.StartInfo.RedirectStandardOutput = false;
+
+            if (!File.Exists(Path.Combine(CurrentBuildPath, "MapleStoryA.exe")))
+            {
+                MessageBox.Show("The directory does not contain the MapleStoryA.exe, please verify you are using the correct directory and try again.");
+                return;
+            }
+
+            try
+            {
+                Process.Start(process.StartInfo);
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Error moving {SelectedServer}: {ex.Message}");
+            }
         }
     }
 }

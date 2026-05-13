@@ -170,10 +170,17 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=LaunchRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding SelectBuildCommand, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" Value="{x:Null}">
+                                            <Setter Property="IsEnabled" Value="False"/>
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding SelectBuildCommand, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" Value="Current Build Path...">
+                                            <Setter Property="IsEnabled" Value="False"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
