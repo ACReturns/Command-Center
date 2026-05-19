@@ -12,15 +12,14 @@ using System.Windows.Shapes;
 
 namespace CommandCenter
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
+        BuildSelection buildSelection { get; set; }
         public MainWindow()
         {
             InitializeComponent();
-            this.DataContext = new BuildSelection();
+            buildSelection = new BuildSelection();
+            DataContext = buildSelection;
         }
     }
 }

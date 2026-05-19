@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Windows;
 using System.Windows.Input;
 
 namespace CommandCenter.ViewModel
@@ -12,10 +13,19 @@ namespace CommandCenter.ViewModel
         private readonly Action<object> _execute;
         private readonly Predicate<object> _canExecute;
 
+        public Action<Action<object, RoutedEventArgs>, RoutedEventArgs> OnExtractZipClick { get; }
+        public Func<object, bool> CanExecuteSelectBuildAction { get; }
+
         public RelayCommand(Action<object> execute, Predicate<object> canExecute = null)
         {
             _execute = execute;
             _canExecute = canExecute;
+        }
+
+        public RelayCommand(Action<Action<object, RoutedEventArgs>, RoutedEventArgs> onExtractZipClick, Func<object, bool> canExecuteSelectBuildAction)
+        {
+            OnExtractZipClick = onExtractZipClick;
+            CanExecuteSelectBuildAction = canExecuteSelectBuildAction;
         }
 
         public bool CanExecute(object parameter) => _canExecute == null || _canExecute(parameter);

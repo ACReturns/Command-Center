@@ -6,6 +6,8 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -18,16 +20,32 @@ namespace CommandCenter.ViewModel
 {
     public class BuildSelection : INotifyPropertyChanged
     {
+        #region Properties
         public ICommand SelectBuildCommand { get; set; }
         public ICommand UpdateBuildCommand { get; set; }
         public ICommand PatchUpdateCommand { get; set; }
         public ICommand LaunchBuildCommand { get; set; }
-        public ICommand ExtractCommand { get; set; }
+        public ICommand ExtractBuildCommand { get; set; }
+        public ICommand ServerStatusCommand { get; set; }
 
-        private string _currentBuildPath = "Current Build Path...";
+        public BuildSelection()
+        {
+            // Bind the command to a method
+            SelectBuildCommand = new RelayCommand(ExecuteSelectBuildAction, CanExecuteSelectBuildAction);
+            PatchUpdateCommand = new RelayCommand(ExecuteUpdateAction, CanExecuteSelectBuildAction);
+            LaunchBuildCommand = new RelayCommand(ExecuteLaunchBuildAction, CanExecuteSelectBuildAction);
+            ExtractBuildCommand = new RelayCommand(OnExtractZipClick, CanExecuteSelectBuildAction);
+            ServerStatusCommand = new RelayCommand(ExecuteServerStatusAction, CanExecuteSelectBuildAction);
+        }
+
+        private string _currentBuildPath;
         private string _newBuildPath = "New Build Path...";
         private string _newPatchPath = "New Patch Path...";
-        
+        private Button _updateButton = new Button();
+        public ProgressBar ExtractionProgressBar { get; set; }
+        public TextBlock StatusLabel { get; set; }
+        //public Button btnUpdate { get; set; }
+
         static Dictionary<string, string> ServerPaths = new Dictionary<string, string>
         {
             {"Test 1", "GameLaunching 34.217.160.238 8484"},
@@ -43,7 +61,13 @@ namespace CommandCenter.ViewModel
         private List<string> _servers = ServerPaths.Keys.ToList();
         private string _selectedServer = ServerPaths.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
-        
+
+        public Button btnUpdate
+        {
+            get { return _updateButton; }
+            set { _updateButton = value; }
+        }
+
         public List<string> Servers
         {
             get { return _servers; }
@@ -58,10 +82,11 @@ namespace CommandCenter.ViewModel
                 if (_currentBuildPath != value)
                 {
                     _currentBuildPath = value;
+                    OnPropertyChanged(CurrentBuildPath);
                 }
-                OnPropertyChanged(CurrentBuildPath);
             }
         }
+
         public string NewBuildPath 
         {
             get => _newBuildPath;
@@ -101,22 +126,60 @@ namespace CommandCenter.ViewModel
             }
         }
 
-
+        
         public event PropertyChangedEventHandler PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string propertyName = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-        }
+        protected void OnPropertyChanged(string name) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        #endregion
 
-        public BuildSelection()
+        #region Server Status Actions
+        // Ref: https://learn.microsoft.com/en-us/dotnet/api/system.net.sockets.tcpclient.connect?view=netframework-4.8.1
+        public bool IsServerUp(string host, int port)
         {
-            // Bind the command to a method
-            SelectBuildCommand = new RelayCommand(ExecuteSelectBuildAction, CanExecuteSelectBuildAction);
-            PatchUpdateCommand = new RelayCommand(ExecuteUpdateAction, CanExecuteSelectBuildAction);
-            LaunchBuildCommand = new RelayCommand(ExecuteLaunchBuildAction, CanExecuteSelectBuildAction);
-            ExtractCommand = new RelayCommand(ExecuteExtractAction, CanExecuteSelectBuildAction);
-        }
+            try
+            {
+                using (TcpClient client = new TcpClient())
+                {
+                    // Connect with a timeout
+                    var result = client.BeginConnect(host, port, null, null);
+                    bool success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromSeconds(2));
 
+                    if (!success) return false;
+
+                    client.EndConnect(result);
+                    return true;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        public void ExecuteServerStatusAction(object obj)
+        {
+            string filePath = @"C:\Users\dosmith\Desktop\MapleStory\Server Check Files\MSLIVE_Server Status_AWS\server_status.json";
+
+            if (!File.Exists(filePath))
+            {
+                return;
+            }
+
+            // TODO make a dictionary that seperates each server by Port/ IP and then loop through them to check the status of each server and display it in a user friendly way, maybe a list with green/ red indicators for up/ down status
+            string serverIP = "52.41.88.16";
+            int port = 8585;
+
+            if (IsServerUp(serverIP, port))
+            {
+                MessageBox.Show($"Server {serverIP} is up!");
+            }
+            else
+            {
+                MessageBox.Show($"Server {serverIP} is down.");
+            }
+        }
+        #endregion
+
+            #region Get Build Path Actions
         private void ExecuteSelectBuildAction(object obj)
         {
             // Display dialog to select current build directory
@@ -133,7 +196,9 @@ namespace CommandCenter.ViewModel
                 CurrentBuildPath = dialog.FolderName;
             }
         }
+        #endregion
 
+        #region Update Build Actions
         private void ExecuteUpdateAction(object obj)
         {
             // Display dialog to select Updated build/ Patch  directory
@@ -150,45 +215,7 @@ namespace CommandCenter.ViewModel
                 NewPatchPath = dialog.FileName;
             }
         }
-
-        private void ExecuteExtractAction(object obj)
-        {
-            // TODO Look into adding Async to not lockup the UI while its running extractions
-            // TODO Lock other buttons while this is running to not cause issues, seet Variable thats flagged to active/ inactive
-
-            // Extract the patch in a temp directory on the desktop 
-            if (!Directory.Exists(tempDir))
-            {
-                Directory.CreateDirectory(tempDir);
-            }
-
-            ZipFile.ExtractToDirectory(NewPatchPath, tempDir);
-
-            //Move files into the main directory, excluding the header folders from the Zip file
-
-            foreach (string subDir in Directory.GetDirectories(tempDir))
-            {
-                string folderName = Path.GetFileName(subDir);
-
-                foreach (string filePath in Directory.GetFiles(subDir))
-                {
-                    string fileName = Path.GetFileName(filePath);
-                    string destFilePath = Path.Combine(CurrentBuildPath, fileName);
-
-                    try
-                    {
-                        File.Move(filePath, destFilePath, overwrite: true);
-                    }
-                    catch (IOException ex)
-                    {
-                        Console.WriteLine($"Error moving {fileName}: {ex.Message}");
-                    }
-                }
-            }
-
-            // Step 3 Clean up temp directory
-            Directory.Delete(tempDir, recursive: true);
-        }
+        #endregion
 
         private bool CanExecuteSelectBuildAction(object obj)
         {
@@ -196,6 +223,7 @@ namespace CommandCenter.ViewModel
             return true;
         }
 
+        #region Launch Build Actions
         private void ExecuteLaunchBuildAction(object obj)
         {
             if (!Path.Exists(CurrentBuildPath))
@@ -240,6 +268,7 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
+            // File & Directory exist, so we can launch the build now
             try
             {
                 Process.Start(process.StartInfo);
@@ -249,5 +278,137 @@ namespace CommandCenter.ViewModel
                 Console.WriteLine($"Error moving {SelectedServer}: {ex.Message}");
             }
         }
+        #endregion
+
+        #region Extraction Actions
+        private void ExecuteExtractAction(object obj)
+        {
+            // TODO Look into adding Async to not lockup the UI while its running extractions
+            // TODO Lock other buttons while this is running to not cause issues, seet Variable thats flagged to active/ inactive
+
+            // Extract the patch in a temp directory on the desktop 
+            if (!Directory.Exists(tempDir))
+            {
+                Directory.CreateDirectory(tempDir);
+            }
+
+            //OnExtractZipClick();
+            //ZipFile.ExtractToDirectory(NewPatchPath, tempDir);
+
+            //Move files into the main directory, excluding the header folders from the Zip file
+
+            foreach (string subDir in Directory.GetDirectories(tempDir))
+            {
+                string folderName = Path.GetFileName(subDir);
+
+                foreach (string filePath in Directory.GetFiles(subDir))
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    string destFilePath = Path.Combine(CurrentBuildPath, fileName);
+
+                    try
+                    {
+                        File.Move(filePath, destFilePath, overwrite: true);
+                    }
+                    catch (IOException ex)
+                    {
+                        Console.WriteLine($"Error moving {fileName}: {ex.Message}");
+                    }
+                }
+            }
+
+            // Step 3 Clean up temp directory
+            Directory.Delete(tempDir, recursive: true);
+        }
+
+        private async void OnExtractZipClick(Action<object, RoutedEventArgs> sender, RoutedEventArgs e)
+        {
+            // Extract the patch in a temp directory on the desktop 
+            if (!Directory.Exists(tempDir))
+            {
+                Directory.CreateDirectory(tempDir);
+            }
+
+            // Setup IProgress to update the UI on the main thread
+            var progress = new Progress<double>(value =>
+            {
+                ExtractionProgressBar.Value = value;
+                StatusLabel.Text = $"Progress: {value:F0}%";
+            });
+
+            var progress2 = new Progress<double>(value =>
+            {
+                ExtractionProgressBar.Value = value;
+                StatusLabel.Text = $"Progress: {value:F0}%";
+            });
+
+            await Task.Run(() => ExtractWithProgress(NewPatchPath, tempDir, progress));
+            StatusLabel.Text = "Extraction Complete!";
+
+            await Task.Run(() => MoveWithProgress(progress2));
+            StatusLabel.Text = "Move Complete!";
+        }
+
+        private void ExtractWithProgress(string zipPath, string extractPath, IProgress<double> progress)
+        {
+            using (ZipArchive archive = ZipFile.OpenRead(zipPath))
+            {
+                int totalFiles = archive.Entries.Count;
+                int extractedFiles = 0;
+
+                foreach (ZipArchiveEntry entry in archive.Entries)
+                {
+                    // Determine full path for the extracted file
+                    string fullPath = Path.Combine(extractPath, entry.FullName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(fullPath));
+
+                    // Extract the individual file
+                    if (!string.IsNullOrEmpty(entry.Name)) // Skips directories which are entries too
+                    {
+                        entry.ExtractToFile(fullPath, overwrite: true);
+                    }
+
+                    // Report progress
+                    extractedFiles++;
+                    double percentage = (double)extractedFiles / totalFiles * 100;
+                    progress.Report(percentage);
+                }
+            }
+        }
+
+        private void MoveWithProgress(IProgress<double> progress)
+        {
+            //Move files into the main directory, excluding the header folders from the Zip file
+            foreach (string subDir in Directory.GetDirectories(tempDir))
+            {
+                int totalFiles = tempDir.Count();
+                int movedFiles = 0;
+                string folderName = Path.GetFileName(subDir);
+
+                foreach (string filePath in Directory.GetFiles(subDir))
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    string destFilePath = Path.Combine(CurrentBuildPath, fileName);
+
+                    try
+                    {
+                        File.Move(filePath, destFilePath, overwrite: true);
+                    }
+                    catch (IOException ex)
+                    {
+                        Console.WriteLine($"Error moving {fileName}: {ex.Message}");
+                    }
+
+                    // Report progress
+                    movedFiles++;
+                    double percentage = (double)movedFiles / totalFiles * 100;
+                    progress.Report(percentage);
+                }
+            }
+
+            // Step 3 Clean up temp directory
+            Directory.Delete(tempDir, recursive: true);
+        }
+        #endregion
     }
 }

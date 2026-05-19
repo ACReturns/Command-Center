@@ -9,6 +9,14 @@
     {
       "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
       "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\viewmodel\\relaycommand.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:viewmodel\\relaycommand.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -18,8 +26,34 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 3,
           "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "MainWindow.xaml.cs",
+              "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml.cs",
+              "RelativeDocumentMoniker": "MainWindow.xaml.cs",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml.cs",
+              "RelativeToolTip": "MainWindow.xaml.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAABcAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-14T23:53:04.354Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "RelayCommand.cs",
+              "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\RelayCommand.cs",
+              "RelativeDocumentMoniker": "ViewModel\\RelayCommand.cs",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\RelayCommand.cs",
+              "RelativeToolTip": "ViewModel\\RelayCommand.cs",
+              "ViewState": "AgIAAAMAAAAAAAAAAADgvx4AAAA0AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-05-13T21:53:37.408Z",
+              "EditorCaption": ""
+            },
             {
               "$type": "Document",
               "DocumentIndex": 1,
@@ -40,7 +74,7 @@
               "RelativeDocumentMoniker": "ViewModel\\BuildSelection.cs",
               "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
               "RelativeToolTip": "ViewModel\\BuildSelection.cs",
-              "ViewState": "AgIAAOcAAAAAAAAAAAAAAO4AAACWAAAAAAAAAA==",
+              "ViewState": "AgIAAIwAAAAAAAAAAAAWwJsAAAANAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-12T18:22:40.633Z",
               "EditorCaption": ""
