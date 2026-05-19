@@ -17,7 +17,6 @@ namespace CommandCenter.ViewModel
         #region Properties
         public ICommand SelectBuildCommand { get; set; }
         public ICommand SelectUpdateCommand { get; set; }
-        //public ICommand UpdateCommand { get; set; }
         public ICommand LaunchBuildCommand { get; set; }
         public ICommand ServerStatusCommand { get; set; }
         public ICommand UpdateCommand => new RelayCommand(async (PerformOnExtractZipClickAsync) => await MyMethodAsync());
@@ -37,6 +36,7 @@ namespace CommandCenter.ViewModel
         private string _newBuildPath;
         private string _newPatchPath;
         private string _currentStatus;
+        private bool _isUpdating;
         double _progressValue;
         private Button _updateButton = new Button();
         public ProgressBar ExtractionProgressBar = new ProgressBar();
@@ -57,24 +57,6 @@ namespace CommandCenter.ViewModel
         private List<string> _servers = ServerPaths.Keys.ToList();
         private string _selectedServer = ServerPaths.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
-        
-        public double ProgressValue
-        {
-            get => _progressValue;
-            set { _progressValue = value; OnPropertyChanged(); }
-
-        }
-
-        public string CurrentStatus
-        {
-            get => _currentStatus;
-            set { _currentStatus = value; OnPropertyChanged(); }
-        }
-        public Button btnUpdate
-        {
-            get { return _updateButton; }
-            set { _updateButton = value; }
-        }
 
         public List<string> Servers
         {
@@ -82,58 +64,51 @@ namespace CommandCenter.ViewModel
             set { _servers = value; }
         }
 
+        public bool IsUpdating
+        {
+            get => _isUpdating;
+            set { _isUpdating = value; OnPropertyChanged(); }
+        }
+        public double ProgressValue
+        {
+            get => _progressValue;
+            set { _progressValue = value; OnPropertyChanged(); }
+        }
+
+        public string CurrentStatus
+        {
+            get => _currentStatus;
+            set { _currentStatus = value; OnPropertyChanged(); }
+        }
+
         public string CurrentBuildPath 
         {
             get => _currentBuildPath;
-            set { _currentBuildPath = value; OnPropertyChanged(CurrentBuildPath); }
+            set { _currentBuildPath = value; OnPropertyChanged(); }
         }
 
         public string NewBuildPath 
         {
             get => _newBuildPath;
-            set
-            {
-                if (_newBuildPath != value)
-                {
-                    _newBuildPath = value;
-                    OnPropertyChanged(NewBuildPath);
-                }
-            }
+            set { _newBuildPath = value; OnPropertyChanged(); }
         }
 
         public string NewPatchPath
         {
             get => _newPatchPath;
-            set
-            {
-                if (_newPatchPath != value)
-                {
-                    _newPatchPath = value;
-                    OnPropertyChanged(NewPatchPath);
-                }
-            }
+            set { _newPatchPath = value; OnPropertyChanged(NewPatchPath); }
         }
 
         public string SelectedServer
         {
             get => _selectedServer;
-            set
-            {
-                if (_selectedServer != value)
-                {
-                    _selectedServer = value;
-                    OnPropertyChanged(SelectedServer);
-                }
-            }
+            set { _selectedServer = value; OnPropertyChanged(SelectedServer); }
         }
 
         
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-
-        //protected void OnPropertyChanged(int progress) =>
-        //PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(progress));
         #endregion
 
         #region Server Status Actions

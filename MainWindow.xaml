@@ -34,7 +34,7 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <TextBox Text="{Binding CurrentBuildPath, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
+                    <TextBox Text="{Binding CurrentBuildPath,Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" MinWidth="120" Width="Auto" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
                         <TextBox.Style>
                             <Style TargetType="TextBox">
                                 <!-- Hidden by default -->
@@ -72,7 +72,8 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <TextBox Text="{Binding NewBuildPath, UpdateSourceTrigger=PropertyChanged, Mode=OneWay}" HorizontalAlignment="Left" Margin="-153,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False">
+                        <TextBox Text="{Binding NewBuildPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="-153,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" MinWidth="120" Width="Auto" 
+                                 RenderTransformOrigin="0.01,1.034" IsEnabled="False">
                             <TextBox.Style>
                                 <Style TargetType="TextBox">
                                     <!-- Hidden by default -->
