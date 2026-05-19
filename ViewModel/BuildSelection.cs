@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -35,6 +36,8 @@ namespace CommandCenter.ViewModel
         private string _currentBuildPath;
         private string _newBuildPath;
         private string _newPatchPath;
+        private string _currentStatus;
+        double _progressValue;
         private Button _updateButton = new Button();
         public ProgressBar ExtractionProgressBar = new ProgressBar();
         public TextBlock StatusLabel = new TextBlock();
@@ -54,7 +57,19 @@ namespace CommandCenter.ViewModel
         private List<string> _servers = ServerPaths.Keys.ToList();
         private string _selectedServer = ServerPaths.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
+        
+        public double ProgressValue
+        {
+            get => _progressValue;
+            set { _progressValue = value; OnPropertyChanged(); }
 
+        }
+
+        public string CurrentStatus
+        {
+            get => _currentStatus;
+            set { _currentStatus = value; OnPropertyChanged(); }
+        }
         public Button btnUpdate
         {
             get { return _updateButton; }
@@ -69,15 +84,8 @@ namespace CommandCenter.ViewModel
 
         public string CurrentBuildPath 
         {
-            get { return _currentBuildPath; }
-            set
-            {
-                if (_currentBuildPath != value)
-                {
-                    _currentBuildPath = value;
-                    OnPropertyChanged(CurrentBuildPath);
-                }
-            }
+            get => _currentBuildPath;
+            set { _currentBuildPath = value; OnPropertyChanged(CurrentBuildPath); }
         }
 
         public string NewBuildPath 
@@ -121,8 +129,11 @@ namespace CommandCenter.ViewModel
 
         
         public event PropertyChangedEventHandler PropertyChanged;
-        protected void OnPropertyChanged(string name) =>
+        protected void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        //protected void OnPropertyChanged(int progress) =>
+        //PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(progress));
         #endregion
 
         #region Server Status Actions
@@ -214,46 +225,6 @@ namespace CommandCenter.ViewModel
         #endregion
 
         #region Extraction Actions
-        private void ExecuteExtractAction(object obj)
-        {
-            // TODO Look into adding Async to not lockup the UI while its running extractions
-            // TODO Lock other buttons while this is running to not cause issues, seet Variable thats flagged to active/ inactive
-
-            // Extract the patch in a temp directory on the desktop 
-            if (!Directory.Exists(tempDir))
-            {
-                Directory.CreateDirectory(tempDir);
-            }
-
-            //OnExtractZipClick();
-            //ZipFile.ExtractToDirectory(NewPatchPath, tempDir);
-
-            //Move files into the main directory, excluding the header folders from the Zip file
-
-            foreach (string subDir in Directory.GetDirectories(tempDir))
-            {
-                string folderName = Path.GetFileName(subDir);
-
-                foreach (string filePath in Directory.GetFiles(subDir))
-                {
-                    string fileName = Path.GetFileName(filePath);
-                    string destFilePath = Path.Combine(CurrentBuildPath, fileName);
-
-                    try
-                    {
-                        File.Move(filePath, destFilePath, overwrite: true);
-                    }
-                    catch (IOException ex)
-                    {
-                        Console.WriteLine($"Error moving {fileName}: {ex.Message}");
-                    }
-                }
-            }
-
-            // Step 3 Clean up temp directory
-            Directory.Delete(tempDir, recursive: true);
-        }
-
         private async Task MyMethodAsync()
         {
             if (CurrentBuildPath == null || NewBuildPath == null)
@@ -268,23 +239,30 @@ namespace CommandCenter.ViewModel
             }
 
             // Setup IProgress to update the UI on the main thread
-            var extractionProgress = new Progress<double>(value =>
+            var extractionProgress = new Progress<double>(percent =>
             {
-                ExtractionProgressBar.Value = value;
-                StatusLabel.Text = $"Progress: {value:F0}%";
+                ProgressValue = percent;
+                int percentRange = (int)Math.Floor(percent);
+                CurrentStatus = percentRange.ToString() + " %";
             });
-
+            
             await Task.Run(() => ExtractWithProgress(NewBuildPath, tempDir, extractionProgress));
-            StatusLabel.Text = "Extraction Complete!";
+            CurrentStatus = "Extraction Complete!";
 
-            var moveProgress = new Progress<double>(value =>
+            if (ProgressValue == 100)
             {
-                ExtractionProgressBar.Value = value;
-                StatusLabel.Text = $"Progress: {value:F0}%";
+                ProgressValue = 0;
+            }
+
+            var moveProgress = new Progress<double>(percent =>
+            {
+                ProgressValue = percent;
+                int percentRange = (int)Math.Floor(percent);
+                CurrentStatus = "Moving Files...";
             });
 
             await Task.Run(() => MoveWithProgress(moveProgress));
-            StatusLabel.Text = "Move Complete!";
+            CurrentStatus = "Move Complete!";
         }
 
         private void ExtractWithProgress(string zipPath, string extractPath, IProgress<double> progress)
@@ -309,7 +287,7 @@ namespace CommandCenter.ViewModel
                     // Report progress
                     extractedFiles++;
                     double percentage = (double)extractedFiles / totalFiles * 100;
-                    progress.Report(percentage);
+                    progress?.Report(percentage);
                 }
             }
         }

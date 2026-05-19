@@ -101,7 +101,7 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <ProgressBar x:Name="ExtractionProgressBar" Margin="-126, 60, -150,20" Maximum="{Binding ExtractionProgressBar}">
+                        <ProgressBar x:Name="ExtractionProgressBar" Value="{Binding ProgressValue}" Margin="-126, 60, -150,20" Minimum="0" Maximum="100">
                             <ProgressBar.Style>
                                 <Style TargetType="ProgressBar">
                                     <!-- Hidden by default -->
@@ -118,7 +118,7 @@
                                 </Style>
                             </ProgressBar.Style>
                         </ProgressBar>
-                        <TextBlock Text="{Binding StatusLabel}" Margin="160, 60, 0,20">
+                        <TextBlock Text="{Binding CurrentStatus}" Margin="-61, 62, 0,20" Width="150" HorizontalAlignment="Center" TextAlignment="Center">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
                                     <!-- Hidden by default -->
@@ -137,7 +137,7 @@
                         </TextBlock>
 
                         <!-- Patch build Option -->
-                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
+                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-386, 34,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -151,7 +151,7 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <TextBox Text="{Binding NewPatchPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" HorizontalAlignment="Left" Margin="-153,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False">
+                        <TextBox Text="{Binding NewPatchPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" HorizontalAlignment="Left" Margin="-333,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False">
                             <TextBox.Style>
                                 <Style TargetType="TextBox">
                                     <!-- Hidden by default -->
@@ -165,7 +165,7 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
+                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-386, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
