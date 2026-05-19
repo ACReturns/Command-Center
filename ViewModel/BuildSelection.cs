@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32;
+﻿using CommandCenter.ViewModel;
+using Microsoft.Win32;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -14,29 +15,29 @@ namespace CommandCenter.ViewModel
     {
         #region Properties
         public ICommand SelectBuildCommand { get; set; }
-        public ICommand UpdateBuildCommand { get; set; }
-        public ICommand PatchUpdateCommand { get; set; }
+        public ICommand SelectUpdateCommand { get; set; }
+        //public ICommand UpdateCommand { get; set; }
         public ICommand LaunchBuildCommand { get; set; }
-        public ICommand ExtractBuildCommand { get; set; }
         public ICommand ServerStatusCommand { get; set; }
+        public ICommand UpdateCommand => new RelayCommand(async (PerformOnExtractZipClickAsync) => await MyMethodAsync());
+
+        
 
         public BuildSelection()
         {
             // Bind the command to a method
             SelectBuildCommand = new RelayCommand(ExecuteSelectBuildAction, CanExecuteSelectBuildAction);
-            PatchUpdateCommand = new RelayCommand(ExecuteUpdateAction, CanExecuteSelectBuildAction);
+            SelectUpdateCommand = new RelayCommand(ExecuteSelectUpdateAction, CanExecuteSelectBuildAction);
             LaunchBuildCommand = new RelayCommand(ExecuteLaunchBuildAction, CanExecuteSelectBuildAction);
-            ExtractBuildCommand = new RelayCommand(OnExtractZipClick, CanExecuteSelectBuildAction);
             ServerStatusCommand = new RelayCommand(ExecuteServerStatusAction, CanExecuteSelectBuildAction);
         }
 
         private string _currentBuildPath;
-        private string _newBuildPath = "New Build Path...";
-        private string _newPatchPath = "New Patch Path...";
+        private string _newBuildPath;
+        private string _newPatchPath;
         private Button _updateButton = new Button();
-        public ProgressBar ExtractionProgressBar { get; set; }
-        public TextBlock StatusLabel { get; set; }
-        //public Button btnUpdate { get; set; }
+        public ProgressBar ExtractionProgressBar = new ProgressBar();
+        public TextBlock StatusLabel = new TextBlock();
 
         static Dictionary<string, string> ServerPaths = new Dictionary<string, string>
         {
@@ -87,8 +88,8 @@ namespace CommandCenter.ViewModel
                 if (_newBuildPath != value)
                 {
                     _newBuildPath = value;
+                    OnPropertyChanged(NewBuildPath);
                 }
-                OnPropertyChanged(NewBuildPath);
             }
         }
 
@@ -100,8 +101,8 @@ namespace CommandCenter.ViewModel
                 if (_newPatchPath != value)
                 {
                     _newPatchPath = value;
+                    OnPropertyChanged(NewPatchPath);
                 }
-                OnPropertyChanged(NewPatchPath);
             }
         }
 
@@ -113,8 +114,8 @@ namespace CommandCenter.ViewModel
                 if (_selectedServer != value)
                 {
                     _selectedServer = value;
+                    OnPropertyChanged(SelectedServer);
                 }
-                OnPropertyChanged(SelectedServer);
             }
         }
 
@@ -161,6 +162,8 @@ namespace CommandCenter.ViewModel
             string serverIP = "52.41.88.16";
             int port = 8585;
 
+            // TODO Setup UI to display that verifies the servers in a visual way thats easy to see at a glance what it up/ down
+
             if (IsServerUp(serverIP, port))
             {
                 MessageBox.Show($"Server {serverIP} is up!");
@@ -172,7 +175,8 @@ namespace CommandCenter.ViewModel
         }
         #endregion
 
-            #region Get Build Path Actions
+        #region Get Build Path Actions
+        // Get current build
         private void ExecuteSelectBuildAction(object obj)
         {
             // Display dialog to select current build directory
@@ -189,86 +193,22 @@ namespace CommandCenter.ViewModel
                 CurrentBuildPath = dialog.FolderName;
             }
         }
-        #endregion
 
-        #region Update Build Actions
-        private void ExecuteUpdateAction(object obj)
+        // Get Update/ Patch zip path
+        private void ExecuteSelectUpdateAction(object obj)
         {
             // Display dialog to select Updated build/ Patch  directory
 
             var dialog = new OpenFileDialog();
             dialog.Multiselect = false;
-            dialog.Title = "Select a Zip file";
+            dialog.Title = "Select a Zip file in order to Update/ Patch the build";
             dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
 
             bool? result = dialog.ShowDialog();
 
             if (result == true)
             {
-                NewPatchPath = dialog.FileName;
-            }
-        }
-        #endregion
-
-        private bool CanExecuteSelectBuildAction(object obj)
-        {
-            // Return false to automatically disable the button
-            return true;
-        }
-
-        #region Launch Build Actions
-        private void ExecuteLaunchBuildAction(object obj)
-        {
-            if (!Path.Exists(CurrentBuildPath))
-            {
-                MessageBox.Show("Please set a valid build directory to launch a build from then try again");
-                return;
-            }
-            //ServerSelection();
-
-            // Launch Build
-            var launchInfo = new ProcessStartInfo("MapleStoryA.exe");
-            
-
-            Process process = new Process();
-            string launchServer = "0.0.0.0";
-
-            // Set the server to utilize
-            foreach (KeyValuePair<string, string> entry in ServerPaths)
-            {
-                if (entry.Key == SelectedServer)
-                {
-                    launchServer = entry.Value;
-                    break;
-                }
-            }
-            
-            process.StartInfo.WorkingDirectory = CurrentBuildPath;
-            process.StartInfo.FileName = "MapleStoryA.exe";
-            process.StartInfo.Arguments = launchServer + " -w";
-
-            process.StartInfo.Verb = "runas";
-            process.StartInfo.WindowStyle = ProcessWindowStyle.Normal;
-
-            //Optional: Hide the window and redirect output
-            process.StartInfo.CreateNoWindow = true;
-            process.StartInfo.UseShellExecute = true;
-            process.StartInfo.RedirectStandardOutput = false;
-
-            if (!File.Exists(Path.Combine(CurrentBuildPath, "MapleStoryA.exe")))
-            {
-                MessageBox.Show("The directory does not contain the MapleStoryA.exe, please verify you are using the correct directory and try again.");
-                return;
-            }
-
-            // File & Directory exist, so we can launch the build now
-            try
-            {
-                Process.Start(process.StartInfo);
-            }
-            catch (IOException ex)
-            {
-                Console.WriteLine($"Error moving {SelectedServer}: {ex.Message}");
+                NewBuildPath = dialog.FileName;
             }
         }
         #endregion
@@ -314,8 +254,13 @@ namespace CommandCenter.ViewModel
             Directory.Delete(tempDir, recursive: true);
         }
 
-        private async void OnExtractZipClick(Action<object, RoutedEventArgs> sender, RoutedEventArgs e)
+        private async Task MyMethodAsync()
         {
+            if (CurrentBuildPath == null || NewBuildPath == null)
+            {
+                MessageBox.Show("Please ensure there is a current & updated build path established before trying again");
+                return;
+            }
             // Extract the patch in a temp directory on the desktop 
             if (!Directory.Exists(tempDir))
             {
@@ -323,22 +268,22 @@ namespace CommandCenter.ViewModel
             }
 
             // Setup IProgress to update the UI on the main thread
-            var progress = new Progress<double>(value =>
+            var extractionProgress = new Progress<double>(value =>
             {
                 ExtractionProgressBar.Value = value;
                 StatusLabel.Text = $"Progress: {value:F0}%";
             });
 
-            var progress2 = new Progress<double>(value =>
-            {
-                ExtractionProgressBar.Value = value;
-                StatusLabel.Text = $"Progress: {value:F0}%";
-            });
-
-            await Task.Run(() => ExtractWithProgress(NewPatchPath, tempDir, progress));
+            await Task.Run(() => ExtractWithProgress(NewBuildPath, tempDir, extractionProgress));
             StatusLabel.Text = "Extraction Complete!";
 
-            await Task.Run(() => MoveWithProgress(progress2));
+            var moveProgress = new Progress<double>(value =>
+            {
+                ExtractionProgressBar.Value = value;
+                StatusLabel.Text = $"Progress: {value:F0}%";
+            });
+
+            await Task.Run(() => MoveWithProgress(moveProgress));
             StatusLabel.Text = "Move Complete!";
         }
 
@@ -402,6 +347,86 @@ namespace CommandCenter.ViewModel
             // Step 3 Clean up temp directory
             Directory.Delete(tempDir, recursive: true);
         }
+
+        private void CleanOldDirectory()
+        {
+            // Delete old foles and directories in the old path before updating with the new one
+            DirectoryInfo oldFiles = new DirectoryInfo(CurrentBuildPath);
+            foreach (FileInfo file in oldFiles.GetFiles())
+            {
+                file.Delete();
+            }
+
+            foreach (DirectoryInfo dir in oldFiles.GetDirectories())
+            {
+                dir.Delete(true);
+            }
+        }
         #endregion
+
+        #region Launch Build Actions
+        private void ExecuteLaunchBuildAction(object obj)
+        {
+            if (!Path.Exists(CurrentBuildPath))
+            {
+                MessageBox.Show("Please set a valid build directory to launch a build from then try again");
+                return;
+            }
+            //ServerSelection();
+
+            // Launch Build
+            var launchInfo = new ProcessStartInfo("MapleStoryA.exe");
+
+
+            Process process = new Process();
+            string launchServer = "0.0.0.0";
+
+            // Set the server to utilize
+            foreach (KeyValuePair<string, string> entry in ServerPaths)
+            {
+                if (entry.Key == SelectedServer)
+                {
+                    launchServer = entry.Value;
+                    break;
+                }
+            }
+
+            process.StartInfo.WorkingDirectory = CurrentBuildPath;
+            process.StartInfo.FileName = "MapleStoryA.exe";
+            process.StartInfo.Arguments = launchServer + " -w";
+
+            process.StartInfo.Verb = "runas";
+            process.StartInfo.WindowStyle = ProcessWindowStyle.Normal;
+
+            //Optional: Hide the window and redirect output
+            process.StartInfo.CreateNoWindow = true;
+            process.StartInfo.UseShellExecute = true;
+            process.StartInfo.RedirectStandardOutput = false;
+
+            if (!File.Exists(Path.Combine(CurrentBuildPath, "MapleStoryA.exe")))
+            {
+                MessageBox.Show("The directory does not contain the MapleStoryA.exe, please verify you are using the correct directory and try again.");
+                return;
+            }
+
+            // File & Directory exist, so we can launch the build now
+            try
+            {
+                Process.Start(process.StartInfo);
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Error moving {SelectedServer}: {ex.Message}");
+            }
+        }
+        #endregion
+
+        private bool CanExecuteSelectBuildAction(object obj)
+        {
+            // Return false to automatically disable the button
+            return true;
+        }
+
+        
     }
 }

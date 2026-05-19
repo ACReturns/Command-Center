@@ -22,12 +22,6 @@ namespace CommandCenter.ViewModel
             _canExecute = canExecute;
         }
 
-        public RelayCommand(Action<Action<object, RoutedEventArgs>, RoutedEventArgs> onExtractZipClick, Func<object, bool> canExecuteSelectBuildAction)
-        {
-            OnExtractZipClick = onExtractZipClick;
-            CanExecuteSelectBuildAction = canExecuteSelectBuildAction;
-        }
-
         public bool CanExecute(object parameter) => _canExecute == null || _canExecute(parameter);
         public void Execute(object parameter) => _execute(parameter);
 

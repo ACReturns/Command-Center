@@ -34,7 +34,7 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <TextBox Text="{Binding Path=BuildSelection.CurrentBuildPath, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
+                    <TextBox Text="{Binding CurrentBuildPath, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
                         <TextBox.Style>
                             <Style TargetType="TextBox">
                                 <!-- Hidden by default -->
@@ -58,7 +58,7 @@
                         <RadioButton x:Name="LaunchRadioButton" Content="Launch" Margin="13,86,0,0"/>
 
                         <!-- Update Build Option -->
-                        <Button Content="Update" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding PatchUpdateCommand}">
+                        <Button Content="Update" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding SelectUpdateCommand}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -86,7 +86,8 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding ExtractBuildCommand}">
+                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" 
+                                Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -136,7 +137,7 @@
                         </TextBlock>
 
                         <!-- Patch build Option -->
-                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding PatchUpdateCommand}">
+                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -164,7 +165,7 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding ExtractBuildCommand}">
+                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -257,7 +258,8 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <TextBox Text="{Binding Path=BuildSelection.CurrentBuildPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
+                    <TextBox Text="{Binding CurrentBuildPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" 
+                             HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
                         <TextBox.Style>
                             <Style TargetType="TextBox">
                                 <!-- Hidden by default -->
@@ -281,7 +283,7 @@
                         <RadioButton x:Name="ClassicLaunchRadioButton" Content="Launch" Margin="13,86,0,0"/>
 
                         <!-- Update Build Option -->
-                        <Button Content="Update" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding PatchUpdateCommand}">
+                        <Button Content="Update" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding SelectUpdateCommand}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -309,7 +311,7 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding ExtractBuildCommand}">
+                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -359,7 +361,7 @@
                         </TextBlock>
 
                         <!-- Patch build Option -->
-                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding PatchUpdateCommand}">
+                        <Button Content="Patch" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding SelectUpdateCommand}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -387,7 +389,7 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding ExtractBuildCommand}">
+                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-206, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -480,7 +482,8 @@
                             </Style>
                         </Button.Style>
                     </Button>
-                    <TextBox HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" Text="Live Build Path..." VerticalAlignment="Top" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
+                    <TextBox HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" Text="Live Build Path..." VerticalAlignment="Top" 
+                             Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
                         <TextBox.Style>
                             <Style TargetType="TextBox">
                                 <!-- Hidden by default -->
@@ -503,9 +506,9 @@
 
 
                         <!-- Update Build Option -->
-                        
-                        
-                        <Button Content="Update" HorizontalAlignment="Left" Margin="-130, 34,0,0" VerticalAlignment="Top" Command="{Binding UpdateBuildCommand}">
+
+
+                        <Button Content="Update" HorizontalAlignment="Left" Margin="-130, 34,0,0" VerticalAlignment="Top" Command="{Binding SelectUpdateCommand}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -519,7 +522,8 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <TextBox Text="{Binding NewBuildPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" HorizontalAlignment="Left" Margin="-77,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False">
+                        <TextBox Text="{Binding NewBuildPath, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" HorizontalAlignment="Left" Margin="-77,35,0,0" 
+                                 VerticalAlignment="Top" TextWrapping="Wrap" Width="120" RenderTransformOrigin="0.01,1.034" IsEnabled="False">
                             <TextBox.Style>
                                 <Style TargetType="TextBox">
                                     <!-- Hidden by default -->
@@ -533,7 +537,7 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-173, 60,0,0" VerticalAlignment="Top" Command="{Binding ExtractCommand}">
+                        <Button Content="Update Build" HorizontalAlignment="Left" Margin="-173, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
