@@ -9,6 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Folder Include="ServerFiles\" />
     <Folder Include="View\" />
   </ItemGroup>
 

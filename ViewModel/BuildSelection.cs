@@ -1,20 +1,12 @@
 ﻿using Microsoft.Win32;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace CommandCenter.ViewModel
 {
@@ -158,6 +150,7 @@ namespace CommandCenter.ViewModel
         public void ExecuteServerStatusAction(object obj)
         {
             string filePath = @"C:\Users\dosmith\Desktop\MapleStory\Server Check Files\MSLIVE_Server Status_AWS\server_status.json";
+
 
             if (!File.Exists(filePath))
             {

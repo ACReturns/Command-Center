@@ -38,8 +38,7 @@
               "RelativeToolTip": "MainWindow.xaml.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAABcAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-14T23:53:04.354Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-14T23:53:04.354Z"
             },
             {
               "$type": "Document",
@@ -51,8 +50,7 @@
               "RelativeToolTip": "ViewModel\\RelayCommand.cs",
               "ViewState": "AgIAAAMAAAAAAAAAAADgvx4AAAA0AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-05-13T21:53:37.408Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-13T21:53:37.408Z"
             },
             {
               "$type": "Document",
@@ -63,8 +61,7 @@
               "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml",
               "RelativeToolTip": "MainWindow.xaml",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
-              "WhenOpened": "2026-05-12T19:46:29.991Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-05-12T19:46:29.991Z"
             },
             {
               "$type": "Document",
@@ -74,7 +71,7 @@
               "RelativeDocumentMoniker": "ViewModel\\BuildSelection.cs",
               "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
               "RelativeToolTip": "ViewModel\\BuildSelection.cs",
-              "ViewState": "AgIAAIwAAAAAAAAAAAAWwJsAAAANAAAAAAAAAA==",
+              "ViewState": "AgIAAH8AAAAAAAAAAAAQwAgAAAAbAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-12T18:22:40.633Z",
               "EditorCaption": ""
