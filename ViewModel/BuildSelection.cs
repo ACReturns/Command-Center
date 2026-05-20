@@ -19,7 +19,7 @@ namespace CommandCenter.ViewModel
         public ICommand SelectUpdateCommand { get; set; }
         public ICommand LaunchBuildCommand { get; set; }
         public ICommand ServerStatusCommand { get; set; }
-        public ICommand UpdateCommand => new RelayCommand(async (PerformOnExtractZipClickAsync) => await MyMethodAsync());
+        public ICommand UpdateCommand => new RelayCommand(async (PerformZipExtraction) => await PerformExtractZipAsync());
 
         
 
@@ -33,14 +33,14 @@ namespace CommandCenter.ViewModel
         }
 
         private string _currentBuildPath;
+        private string _displayCurrentBuildPath;
         private string _newBuildPath;
+        private string _displayNewBuildPath;
         private string _newPatchPath;
+        private string _displayNewPatchPath;
         private string _currentStatus;
-        private bool _isUpdating;
-        double _progressValue;
-        private Button _updateButton = new Button();
-        public ProgressBar ExtractionProgressBar = new ProgressBar();
-        public TextBlock StatusLabel = new TextBlock();
+        private double _progressValue;
+        private bool _isNotUpdating = true;
 
         static Dictionary<string, string> ServerPaths = new Dictionary<string, string>
         {
@@ -54,8 +54,17 @@ namespace CommandCenter.ViewModel
             {"Staging 2 (NA)", "Gamelaunching 44.234.182.79 8484"}
         };
 
+        static Dictionary<string, string> ServerCheck = new Dictionary<string, string>
+        {
+            {"Live", "Update to json"},
+            {"Staging", "Update to json"},
+            {"Test", "Update to json"}
+        };
+
         private List<string> _servers = ServerPaths.Keys.ToList();
         private string _selectedServer = ServerPaths.Keys.First();
+        private List<string> _serverStatus = ServerCheck.Keys.ToList();
+        private string _selectedServerStatus = ServerCheck.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
 
         public List<string> Servers
@@ -64,10 +73,17 @@ namespace CommandCenter.ViewModel
             set { _servers = value; }
         }
 
-        public bool IsUpdating
+        public List<string> ServerStatus
         {
-            get => _isUpdating;
-            set { _isUpdating = value; OnPropertyChanged(); }
+            get { return _serverStatus; }
+            set { _serverStatus = value; }
+        }
+
+
+        public bool IsNotUpdating
+        {
+            get => _isNotUpdating;
+            set { _isNotUpdating = value; OnPropertyChanged(); }
         }
         public double ProgressValue
         {
@@ -87,25 +103,47 @@ namespace CommandCenter.ViewModel
             set { _currentBuildPath = value; OnPropertyChanged(); }
         }
 
+        public string DisplayCurrentBuildPath
+        {
+            get => _displayCurrentBuildPath;
+            set { _displayCurrentBuildPath = value; OnPropertyChanged(); }
+        }
+
         public string NewBuildPath 
         {
             get => _newBuildPath;
             set { _newBuildPath = value; OnPropertyChanged(); }
         }
+        public string DisplayNewBuildPath
+        {
+            get => _displayNewBuildPath;
+            set { _displayNewBuildPath = value; OnPropertyChanged(); }
+        }
 
         public string NewPatchPath
         {
             get => _newPatchPath;
-            set { _newPatchPath = value; OnPropertyChanged(NewPatchPath); }
+            set { _newPatchPath = value; OnPropertyChanged(); }
+        }
+        public string DisplayNewPatchPath
+        {
+            get => _displayNewPatchPath;
+            set { _displayNewPatchPath = value; OnPropertyChanged(); }
         }
 
         public string SelectedServer
         {
             get => _selectedServer;
-            set { _selectedServer = value; OnPropertyChanged(SelectedServer); }
+            set { _selectedServer = value; OnPropertyChanged(); }
         }
 
-        
+        public string SelectedServerStatus
+        {
+            get => _selectedServerStatus;
+            set { _selectedServerStatus = value; OnPropertyChanged(); }
+        }
+
+
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string name = null) =>
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
@@ -177,6 +215,8 @@ namespace CommandCenter.ViewModel
             if (result == true)
             {
                 CurrentBuildPath = dialog.FolderName;
+                DirectoryInfo dirName = new DirectoryInfo(dialog.FolderName);
+                DisplayCurrentBuildPath = $"...\\{dirName.Name}";
             }
         }
 
@@ -195,18 +235,23 @@ namespace CommandCenter.ViewModel
             if (result == true)
             {
                 NewBuildPath = dialog.FileName;
+                FileInfo fileName = new FileInfo(dialog.FileName);
+                DisplayNewBuildPath = $"...\\{fileName.Name}";
             }
         }
         #endregion
 
         #region Extraction Actions
-        private async Task MyMethodAsync()
+        private async Task PerformExtractZipAsync()
         {
             if (CurrentBuildPath == null || NewBuildPath == null)
             {
                 MessageBox.Show("Please ensure there is a current & updated build path established before trying again");
                 return;
             }
+
+            IsNotUpdating = true;
+
             // Extract the patch in a temp directory on the desktop 
             if (!Directory.Exists(tempDir))
             {
@@ -237,7 +282,6 @@ namespace CommandCenter.ViewModel
             });
 
             await Task.Run(() => MoveWithProgress(moveProgress));
-            CurrentStatus = "Move Complete!";
         }
 
         private void ExtractWithProgress(string zipPath, string extractPath, IProgress<double> progress)
@@ -266,7 +310,6 @@ namespace CommandCenter.ViewModel
                 }
             }
         }
-
         private void MoveWithProgress(IProgress<double> progress)
         {
             //Move files into the main directory, excluding the header folders from the Zip file
@@ -297,8 +340,20 @@ namespace CommandCenter.ViewModel
                 }
             }
 
-            // Step 3 Clean up temp directory
+            CurrentStatus = "Move Complete!";
+            Thread.Sleep(3000);
+            
+            // Clean up temp directory
             Directory.Delete(tempDir, recursive: true);
+
+            CurrentStatus = "Cleaning up Temp files...";
+            Thread.Sleep(3000);
+
+            // Reset everything back to 0 
+            ProgressValue = 0;
+            CurrentStatus = "";
+            IsNotUpdating = false;
+
         }
 
         private void CleanOldDirectory()

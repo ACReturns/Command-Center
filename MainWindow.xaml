@@ -17,11 +17,12 @@
             <TabItem Header="MapleStory Launcher">
                 <Grid Background="#FFE5E5E5">
                     <!-- Default Build Path -->
-                    <Button Content="Select" Command="{Binding SelectBuildCommand}" HorizontalAlignment="Left" Margin="10,9,0,0" VerticalAlignment="Top">
+                    <Button Content="Select" Command="{Binding SelectBuildCommand}" IsEnabled="{Binding IsNotUpdating}" HorizontalAlignment="Left" Margin="10,9,0,0" VerticalAlignment="Top">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <!-- Hidden by default -->
                                 <Setter Property="Visibility" Value="Collapsed" />
+                                <Setter Property="IsEnabled" Value="True"/>
                                 <Style.Triggers>
                                     <!-- Show if the RadioButton is checked -->
                                     <DataTrigger Binding="{Binding ElementName=BuildRadioButton, Path=IsChecked}" Value="True">
@@ -30,11 +31,14 @@
                                     <DataTrigger Binding="{Binding ElementName=PatchRadioButton, Path=IsChecked}" Value="True">
                                         <Setter Property="Visibility" Value="Visible" />
                                     </DataTrigger>
+                                    <DataTrigger Binding="{Binding ElementName=IsNotUpdating}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False" />
+                                    </DataTrigger>
                                 </Style.Triggers>
                             </Style>
                         </Button.Style>
                     </Button>
-                    <TextBox Text="{Binding CurrentBuildPath,Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" MinWidth="120" Width="Auto" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
+                    <TextBox Text="{Binding DisplayCurrentBuildPath,Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="63,10,0,0" TextWrapping="Wrap" VerticalAlignment="Top" MinWidth="120" Width="Auto" RenderTransformOrigin="0.01,1.034" IsEnabled="False" Grid.ColumnSpan="2">
                         <TextBox.Style>
                             <Style TargetType="TextBox">
                                 <!-- Hidden by default -->
@@ -56,6 +60,7 @@
                         <RadioButton x:Name="BuildRadioButton" Content="New Build" Margin="13,86,0,0" IsChecked="True"/>
                         <RadioButton x:Name="PatchRadioButton" Content="Patch" Margin="13,86,0,0"/>
                         <RadioButton x:Name="LaunchRadioButton" Content="Launch" Margin="13,86,0,0"/>
+                    
 
                         <!-- Update Build Option -->
                         <Button Content="Update" HorizontalAlignment="Left" Margin="-206, 34,0,0" VerticalAlignment="Top" Command="{Binding SelectUpdateCommand}">
@@ -72,7 +77,7 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <TextBox Text="{Binding NewBuildPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="-153,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" MinWidth="120" Width="Auto" 
+                        <TextBox Text="{Binding DisplayNewBuildPath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Left" Margin="-153,35,0,0" VerticalAlignment="Top" TextWrapping="Wrap" MinWidth="120" Width="Auto" 
                                  RenderTransformOrigin="0.01,1.034" IsEnabled="False">
                             <TextBox.Style>
                                 <Style TargetType="TextBox">
@@ -234,6 +239,8 @@
                         </ComboBox>
                     </StackPanel>
                     <Button Content="Server Status" Command="{Binding ServerStatusCommand}" HorizontalAlignment="Left" Margin="10,0,0,36" VerticalAlignment="Bottom"/>
+                    <ComboBox ItemsSource="{Binding ServerStatus}" SelectedItem="{Binding SelectedServerStatus, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" SelectedIndex="0" 
+                              HorizontalAlignment="Left" Margin="86,155,0,35" VerticalAlignment="Bottom" Width="Auto"/>
                 </Grid>
             </TabItem>
 
