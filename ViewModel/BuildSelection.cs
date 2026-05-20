@@ -41,6 +41,8 @@ namespace CommandCenter.ViewModel
         private string _currentStatus;
         private double _progressValue;
         private bool _isNotUpdating = true;
+        private bool _canLaunch = false;
+        private bool _canUpdate = false;
 
         static Dictionary<string, string> ServerPaths = new Dictionary<string, string>
         {
@@ -79,11 +81,22 @@ namespace CommandCenter.ViewModel
             set { _serverStatus = value; }
         }
 
+        public bool CanUpdate
+        {
+            get => _canUpdate;
+            set { _canUpdate = value; OnPropertyChanged(); }
+        }
 
         public bool IsNotUpdating
         {
             get => _isNotUpdating;
             set { _isNotUpdating = value; OnPropertyChanged(); }
+        }
+
+        public bool CanLaunch
+        {
+            get => _canLaunch;
+            set { _canLaunch = value; OnPropertyChanged(); }
         }
         public double ProgressValue
         {
@@ -217,6 +230,7 @@ namespace CommandCenter.ViewModel
                 CurrentBuildPath = dialog.FolderName;
                 DirectoryInfo dirName = new DirectoryInfo(dialog.FolderName);
                 DisplayCurrentBuildPath = $"...\\{dirName.Name}";
+                CanLaunch = true;
             }
         }
 
@@ -237,6 +251,7 @@ namespace CommandCenter.ViewModel
                 NewBuildPath = dialog.FileName;
                 FileInfo fileName = new FileInfo(dialog.FileName);
                 DisplayNewBuildPath = $"...\\{fileName.Name}";
+                CanUpdate = true;
             }
         }
         #endregion
@@ -341,19 +356,18 @@ namespace CommandCenter.ViewModel
             }
 
             CurrentStatus = "Move Complete!";
-            Thread.Sleep(3000);
+            Thread.Sleep(5000);
             
             // Clean up temp directory
             Directory.Delete(tempDir, recursive: true);
 
             CurrentStatus = "Cleaning up Temp files...";
-            Thread.Sleep(3000);
+            Thread.Sleep(5000);
 
             // Reset everything back to 0 
             ProgressValue = 0;
             CurrentStatus = "";
             IsNotUpdating = false;
-
         }
 
         private void CleanOldDirectory()

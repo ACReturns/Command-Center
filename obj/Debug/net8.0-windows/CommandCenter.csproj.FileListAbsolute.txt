@@ -41,3 +41,5 @@ C:\Users\dosmith\Desktop\Github\Command-Center\bin\Debug\net8.0-windows\CommandC
 C:\Users\dosmith\Desktop\Github\Command-Center\bin\Debug\net8.0-windows\CommandCenter.pdb
 C:\Users\dosmith\Desktop\Github\Command-Center\obj\Debug\net8.0-windows\CommandCenter.genruntimeconfig.cache
 C:\Users\dosmith\Desktop\Github\Command-Center\obj\Debug\net8.0-windows\ref\CommandCenter.dll
+C:\Users\dosmith\Desktop\Github\Command-Center\obj\Debug\net8.0-windows\View\MapleView.g.cs
+C:\Users\dosmith\Desktop\Github\Command-Center\obj\Debug\net8.0-windows\View\MapleView.baml

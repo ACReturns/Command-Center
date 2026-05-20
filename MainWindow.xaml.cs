@@ -1,4 +1,5 @@
-﻿using CommandCenter.ViewModel;
+﻿using CommandCenter.Model;
+using CommandCenter.ViewModel;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,11 +16,14 @@ namespace CommandCenter
     public partial class MainWindow : Window
     {
         BuildSelection buildSelection { get; set; }
+        SaveDataHandler settings { get; set; }
         public MainWindow()
         {
             InitializeComponent();
             buildSelection = new BuildSelection();
+            settings = new SaveDataHandler();
             DataContext = buildSelection;
+            settings.LoadData();
         }
     }
 }
