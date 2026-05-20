@@ -17,11 +17,12 @@
             <TabItem Header="MapleStory Launcher">
                 <Grid Background="#FFE5E5E5">
                     <!-- Default Build Path -->
-                    <Button Content="Select" Command="{Binding SelectBuildCommand}" IsEnabled="{Binding IsNotUpdating}" HorizontalAlignment="Left" Margin="10,9,0,0" VerticalAlignment="Top">
+                    <Button Content="Select" Command="{Binding SelectBuildCommand}" HorizontalAlignment="Left" Margin="10,9,0,0" VerticalAlignment="Top">
                         <Button.Style>
                             <Style TargetType="Button">
                                 <!-- Hidden by default -->
                                 <Setter Property="Visibility" Value="Collapsed" />
+                                <Setter Property="IsEnabled" Value="True"/>
                                 <Style.Triggers>
                                     <!-- Show if the RadioButton is checked -->
                                     <DataTrigger Binding="{Binding ElementName=BuildRadioButton, Path=IsChecked}" Value="True">
@@ -29,6 +30,9 @@
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding ElementName=PatchRadioButton, Path=IsChecked}" Value="True">
                                         <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -64,10 +68,14 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=BuildRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -107,8 +115,11 @@
                             <ProgressBar.Style>
                                 <Style TargetType="ProgressBar">
                                     <!-- Hidden by default -->
-                                    <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="Visibility" Value="Hidden" />
                                     <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="True">
+                                            <Setter Property="Visibility" Value="Hidden" />
+                                        </DataTrigger>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=BuildRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
@@ -116,6 +127,7 @@
                                         <DataTrigger Binding="{Binding ElementName=PatchRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
                                         </DataTrigger>
+                                        
                                     </Style.Triggers>
                                 </Style>
                             </ProgressBar.Style>
@@ -144,10 +156,14 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=PatchRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -167,7 +183,8 @@
                                 </Style>
                             </TextBox.Style>
                         </TextBox>
-                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-386, 60,0,0" VerticalAlignment="Top" Command="{Binding UpdateCommand, IsAsync=True}">
+                        <Button Content="Patch Build" HorizontalAlignment="Left" Margin="-386, 60,0,0" VerticalAlignment="Top" 
+                                Command="{Binding UpdateCommand, IsAsync=True}" IsEnabled="{Binding CanUpdate, UpdateSourceTrigger=PropertyChanged}">
                             <Button.Style>
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
@@ -202,7 +219,7 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
-                                    <Setter Property="IsEnabled" Value="True"/>
+                                    <Setter Property="IsEnabled" Value="False"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=LaunchRadioButton, Path=IsChecked}" Value="True">
@@ -211,8 +228,8 @@
                                         <DataTrigger Binding="{Binding SelectBuildCommand, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" Value="{x:Null}">
                                             <Setter Property="IsEnabled" Value="False"/>
                                         </DataTrigger>
-                                        <DataTrigger Binding="{Binding SelectBuildCommand, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" Value="Current Build Path...">
-                                            <Setter Property="IsEnabled" Value="False"/>
+                                        <DataTrigger Binding="{Binding CanLaunch}" Value="True">
+                                            <Setter Property="IsEnabled" Value="True"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -234,7 +251,7 @@
                             </ComboBox.Style>
                         </ComboBox>
                     </StackPanel>
-                    <Button Content="Server Status" Command="{Binding ServerStatusCommand}" HorizontalAlignment="Left" Margin="10,0,0,36" VerticalAlignment="Bottom"/>
+                    <Button Content="Server Status" Command="{Binding ServerStatusCommand}" HorizontalAlignment="Left" Margin="10,0,0,36" VerticalAlignment="Bottom" IsEnabled="False"/>
                     <ComboBox ItemsSource="{Binding ServerStatus}" SelectedItem="{Binding SelectedServerStatus, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" SelectedIndex="0" 
                               HorizontalAlignment="Left" Margin="86,155,0,35" VerticalAlignment="Bottom" Width="Auto"/>
                 </Grid>
@@ -243,6 +260,10 @@
             <!-- Classic Build Tav-->
             <TabItem Header="Classic Maple Launcher">
                 <Grid Background="#FFE5E5E5">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="83*"/>
+                        <ColumnDefinition Width="373*"/>
+                    </Grid.ColumnDefinitions>
 
                     <!-- Default Classic Build Path -->
                     <Button Content="Select" Command="{Binding SelectBuildCommand}" HorizontalAlignment="Left" Margin="10,9,0,0" VerticalAlignment="Top">
@@ -250,6 +271,7 @@
                             <Style TargetType="Button">
                                 <!-- Hidden by default -->
                                 <Setter Property="Visibility" Value="Collapsed" />
+                                <Setter Property="IsEnabled" Value="True"/>
                                 <Style.Triggers>
                                     <!-- Show if the RadioButton is checked -->
                                     <DataTrigger Binding="{Binding ElementName=ClassicBuildRadioButton, Path=IsChecked}" Value="True">
@@ -257,6 +279,9 @@
                                     </DataTrigger>
                                     <DataTrigger Binding="{Binding ElementName=ClassicPatchRadioButton, Path=IsChecked}" Value="True">
                                         <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -292,10 +317,14 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=ClassicBuildRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -370,10 +399,14 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=ClassicPatchRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -477,10 +510,14 @@
                             <Style TargetType="Button">
                                 <!-- Hidden by default -->
                                 <Setter Property="Visibility" Value="Collapsed" />
+                                <Setter Property="IsEnabled" Value="True"/>
                                 <Style.Triggers>
                                     <!-- Show if the RadioButton is checked -->
                                     <DataTrigger Binding="{Binding ElementName=UpdateLiveRadioButton, Path=IsChecked}" Value="True">
                                         <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                        <Setter Property="IsEnabled" Value="False" />
                                     </DataTrigger>
                                 </Style.Triggers>
                             </Style>
@@ -517,10 +554,14 @@
                                 <Style TargetType="Button">
                                     <!-- Hidden by default -->
                                     <Setter Property="Visibility" Value="Collapsed" />
+                                    <Setter Property="IsEnabled" Value="True"/>
                                     <Style.Triggers>
                                         <!-- Show if the RadioButton is checked -->
                                         <DataTrigger Binding="{Binding ElementName=UpdateLiveRadioButton, Path=IsChecked}" Value="True">
                                             <Setter Property="Visibility" Value="Visible" />
+                                        </DataTrigger>
+                                        <DataTrigger Binding="{Binding IsUpdating}" Value="False">
+                                            <Setter Property="IsEnabled" Value="False" />
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>

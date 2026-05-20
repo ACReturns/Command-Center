@@ -3,14 +3,6 @@
   "WorkspaceRootPath": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\model\\setting.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:model\\setting.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
-      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
-    },
-    {
       "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\viewmodel\\buildselection.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:viewmodel\\buildselection.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -19,12 +11,16 @@
       "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:mainwindow.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\view\\mapleview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
-      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:view\\mapleview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:mainwindow.xaml.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
     {
-      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\commandcenter.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|",
-      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:commandcenter.csproj||{FA3CD31E-987B-443A-9B81-186104E8DAC1}|"
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\model\\setting.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:model\\setting.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|c:\\users\\dosmith\\desktop\\github\\command-center\\view\\mapleview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}",
+      "RelativeMoniker": "D:0:0:{A82FBCB2-B653-4CF2-8250-421B0CD76B7D}|CommandCenter.csproj|solutionrelative:view\\mapleview.xaml||{F11ACC28-31D1-4C80-A34B-F4E09D3D753C}"
     }
   ],
   "DocumentGroupContainers": [
@@ -38,64 +34,51 @@
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 2,
               "Title": "MainWindow.xaml.cs",
               "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml.cs",
               "RelativeDocumentMoniker": "MainWindow.xaml.cs",
               "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml.cs",
               "RelativeToolTip": "MainWindow.xaml.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAApwBkAAAAMAAAAAAAAAA==",
+              "ViewState": "AgIAAAcAAAAAAAAAAADwvxcAAAAtAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-20T19:17:36.497Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
-              "Title": "CommandCenter",
-              "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj",
-              "RelativeDocumentMoniker": "CommandCenter.csproj",
-              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj",
-              "RelativeToolTip": "CommandCenter.csproj",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
-              "WhenOpened": "2026-05-20T19:06:55.614Z",
-              "EditorCaption": ""
-            },
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 3,
               "Title": "Setting.cs",
               "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\Model\\Setting.cs",
               "RelativeDocumentMoniker": "Model\\Setting.cs",
-              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\Model\\Setting.cs*",
-              "RelativeToolTip": "Model\\Setting.cs*",
-              "ViewState": "AgIAACAAAAAAAAAAAAASwDUAAAAOAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\Model\\Setting.cs",
+              "RelativeToolTip": "Model\\Setting.cs",
+              "ViewState": "AgIAABkAAAAAAAAAAAAiwDEAAAAgAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-20T01:44:36.629Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 0,
               "Title": "BuildSelection.cs",
               "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
               "RelativeDocumentMoniker": "ViewModel\\BuildSelection.cs",
-              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs",
-              "RelativeToolTip": "ViewModel\\BuildSelection.cs",
-              "ViewState": "AgIAAKwBAAAAAAAAAAAhwL4BAAAIAAAAAAAAAA==",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\ViewModel\\BuildSelection.cs*",
+              "RelativeToolTip": "ViewModel\\BuildSelection.cs*",
+              "ViewState": "AgIAAOgAAAAAAAAAAAApwAIBAAANAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-05-12T18:22:40.633Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 1,
               "Title": "MainWindow.xaml",
               "DocumentMoniker": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml",
               "RelativeDocumentMoniker": "MainWindow.xaml",
-              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml",
-              "RelativeToolTip": "MainWindow.xaml",
+              "ToolTip": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\MainWindow.xaml*",
+              "RelativeToolTip": "MainWindow.xaml*",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.003549|",
               "WhenOpened": "2026-05-12T19:46:29.991Z",
               "EditorCaption": ""

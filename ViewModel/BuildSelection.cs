@@ -1,4 +1,5 @@
-﻿using CommandCenter.ViewModel;
+﻿using CommandCenter.Model;
+using CommandCenter.ViewModel;
 using Microsoft.Win32;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -40,7 +41,7 @@ namespace CommandCenter.ViewModel
         private string _displayNewPatchPath;
         private string _currentStatus;
         private double _progressValue;
-        private bool _isNotUpdating = true;
+        private bool _isUpdating = true;
         private bool _canLaunch = false;
         private bool _canUpdate = false;
 
@@ -68,6 +69,8 @@ namespace CommandCenter.ViewModel
         private List<string> _serverStatus = ServerCheck.Keys.ToList();
         private string _selectedServerStatus = ServerCheck.Keys.First();
         private string tempDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "Temp");
+        SaveDataHandler saveSettings = new SaveDataHandler();
+        Setting setting = new Setting();
 
         public List<string> Servers
         {
@@ -87,10 +90,10 @@ namespace CommandCenter.ViewModel
             set { _canUpdate = value; OnPropertyChanged(); }
         }
 
-        public bool IsNotUpdating
+        public bool IsUpdating
         {
-            get => _isNotUpdating;
-            set { _isNotUpdating = value; OnPropertyChanged(); }
+            get => _isUpdating;
+            set { _isUpdating = value; OnPropertyChanged(); }
         }
 
         public bool CanLaunch
@@ -231,6 +234,9 @@ namespace CommandCenter.ViewModel
                 DirectoryInfo dirName = new DirectoryInfo(dialog.FolderName);
                 DisplayCurrentBuildPath = $"...\\{dirName.Name}";
                 CanLaunch = true;
+                setting.UserTestBuildDir = CurrentBuildPath;
+                setting.DisplayTestPath = DisplayCurrentBuildPath;
+                saveSettings.SaveData(setting, saveSettings.filePath);
             }
         }
 
@@ -242,7 +248,16 @@ namespace CommandCenter.ViewModel
             var dialog = new OpenFileDialog();
             dialog.Multiselect = false;
             dialog.Title = "Select a Zip file in order to Update/ Patch the build";
-            dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+            if (NewBuildPath != null)
+            {
+                DirectoryInfo dirName = new DirectoryInfo(NewBuildPath);
+                dialog.InitialDirectory = dirName.Name;
+            }
+            else
+            {
+                dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
 
             bool? result = dialog.ShowDialog();
 
@@ -265,7 +280,11 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
-            IsNotUpdating = true;
+            // Remove once validation checks are done
+            if (CanUpdate)
+            {
+                IsUpdating = false;
+            }
 
             // Extract the patch in a temp directory on the desktop 
             if (!Directory.Exists(tempDir))
@@ -367,7 +386,7 @@ namespace CommandCenter.ViewModel
             // Reset everything back to 0 
             ProgressValue = 0;
             CurrentStatus = "";
-            IsNotUpdating = false;
+            IsUpdating = true;
         }
 
         private void CleanOldDirectory()

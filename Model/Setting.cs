@@ -2,6 +2,7 @@
 using Microsoft.Win32;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Timers;
 using System.Windows.Automation;
 
@@ -10,13 +11,16 @@ namespace CommandCenter.Model
     public class Setting
     {
         public string UserTestBuildDir { get; set; }
+        public string DisplayTestPath { get; set; }
         public string UserLiveBuildDir { get; set; }
+        public string DisplayLivePath { get; set; }
         public string BackgroundColor { get; set; }
     }
 
     public class SaveDataHandler
     {
-        string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
+        public string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
+
         public void SaveData(Setting data, string filePath)
         {
             // Use WriteIndented to make the file human-readable

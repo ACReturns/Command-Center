@@ -15,15 +15,16 @@ namespace CommandCenter
 {
     public partial class MainWindow : Window
     {
-        BuildSelection buildSelection { get; set; }
+        public BuildSelection buildSelection { get; set; }
         SaveDataHandler settings { get; set; }
         public MainWindow()
         {
             InitializeComponent();
             buildSelection = new BuildSelection();
             settings = new SaveDataHandler();
+            Setting setting = settings.LoadData();
+            this.DataContext = setting;
             DataContext = buildSelection;
-            settings.LoadData();
         }
     }
 }
