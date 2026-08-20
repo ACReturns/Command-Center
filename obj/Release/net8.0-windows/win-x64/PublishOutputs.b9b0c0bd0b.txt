@@ -1,5 +1,0 @@
-C:\Users\dosmith\Desktop\Maple Center\CommandCenter.exe
-C:\Users\dosmith\Desktop\Maple Center\CommandCenter.dll
-C:\Users\dosmith\Desktop\Maple Center\CommandCenter.deps.json
-C:\Users\dosmith\Desktop\Maple Center\CommandCenter.runtimeconfig.json
-C:\Users\dosmith\Desktop\Maple Center\CommandCenter.pdb

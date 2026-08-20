@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "VVqFCXQGp7U=",
+  "dgSpecHash": "ab/4bwWKDLY=",
   "success": true,
   "projectFilePath": "C:\\Users\\dosmith\\Desktop\\Github\\Command-Center\\CommandCenter.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\dosmith\\.nuget\\packages\\wpfanimatedgif\\2.0.2\\wpfanimatedgif.2.0.2.nupkg.sha512"
+  ],
   "logs": []
 }

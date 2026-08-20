@@ -1,0 +1,108 @@
+<UserControl x:Class="CommandCenter.View.BuildSectionView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="520">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Header: current build path + version, at a glance -->
+        <Border Grid.Row="0" Background="#FFF3F3F3" BorderBrush="#FFD0D0D0" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock FontWeight="Bold" VerticalAlignment="Center">
+                    <Run Text="{Binding SectionTitle, Mode=OneWay}"/>
+                    <Run Text=" Current Build:"/>
+                </TextBlock>
+                <TextBlock Text="{Binding CurrentBuildPath, Mode=OneWay, TargetNullValue='Not set'}" Margin="6,0,24,0" VerticalAlignment="Center"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentBuildPath}" MaxWidth="340"/>
+                <TextBlock Text="Version:" FontWeight="Bold" VerticalAlignment="Center"/>
+                <TextBlock Text="{Binding VersionNumber, Mode=OneWay}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Mode selector -->
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12" IsEnabled="{Binding IsNotBusy}">
+            <RadioButton Content="New Build" Margin="0,0,16,0" IsChecked="{Binding IsNewBuild}" VerticalAlignment="Center"/>
+            <RadioButton Content="Patch" Margin="0,0,16,0" IsChecked="{Binding IsPatch}" VerticalAlignment="Center"/>
+            <RadioButton Content="Launch" IsChecked="{Binding IsLaunch}" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <!-- New Build / Patch panel -->
+            <StackPanel Visibility="{Binding IsUpdatePanelVisible, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Not configured. Set this section's build path in the Settings tab first." Foreground="#FFB00000" Margin="0,0,0,8"
+                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+
+                <TextBlock Text="Build / Patch Archive (.zip)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <DockPanel Margin="0,0,0,12">
+                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseSourceCommand}"/>
+                    <TextBox Text="{Binding SourceZipPath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                </DockPanel>
+
+                <TextBlock Text="Set Version Number To (optional)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBox Text="{Binding PendingVersion, UpdateSourceTrigger=PropertyChanged}" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+
+                <Button Content="{Binding RunButtonLabel}" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding RunUpdateCommand}"/>
+            </StackPanel>
+
+            <!-- Launch panel -->
+            <StackPanel Visibility="{Binding IsLaunchPanelVisible, Converter={StaticResource BoolToVis}}">
+
+                <!-- GMS/CMS: fixed executable choice + fixed QA server list -->
+                <StackPanel Visibility="{Binding UsesFixedLaunchCatalog, Converter={StaticResource BoolToVis}}">
+                    <TextBlock Foreground="#FFB00000" Margin="0,0,0,8" Visibility="{Binding IsSelectedExecutableMissing, Converter={StaticResource BoolToVis}}">
+                        <Run Text="{Binding SelectedExecutable, Mode=OneWay}"/>
+                        <Run Text=" was not found in the build folder."/>
+                    </TextBlock>
+
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="16"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Select Executable" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ComboBox ItemsSource="{Binding ExecutableOptions}" SelectedItem="{Binding SelectedExecutable}"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Select Server" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <ComboBox ItemsSource="{Binding ServerOptions}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedServerOption}"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Margin="0,12,0,0" Command="{Binding LaunchCommand}"/>
+                </StackPanel>
+
+                <!-- Live Service: launcher scanned from the build folder -->
+                <StackPanel Visibility="{Binding UsesFixedLaunchCatalog, Converter={StaticResource InverseBoolToVis}}">
+                    <TextBlock Text="No launchers (.bat/.exe) found in the current build folder." Foreground="#FFB00000" Margin="0,0,0,8"
+                               Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+
+                    <TextBlock Text="Select Server / Launcher" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                    <DockPanel Margin="0,0,0,12">
+                        <Button Content="Refresh" DockPanel.Dock="Right" Width="90" Command="{Binding RefreshLaunchTargetsCommand}"/>
+                        <ComboBox ItemsSource="{Binding LaunchTargets}" SelectedItem="{Binding SelectedLaunchTarget}" Margin="0,0,8,0"/>
+                    </DockPanel>
+
+                    <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding LaunchCommand}"/>
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+
+        <!-- Progress / status -->
+        <StackPanel Grid.Row="3" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+            <ProgressBar Height="18" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"/>
+            <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0"/>
+        </StackPanel>
+        <TextBlock Grid.Row="3" Text="{Binding StatusText}" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
+    </Grid>
+</UserControl>

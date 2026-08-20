@@ -1,31 +1,62 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System;
 using System.Threading.Tasks;
-using System.Windows;
 using System.Windows.Input;
 
 namespace CommandCenter.ViewModel
 {
     public class RelayCommand : ICommand
     {
-        private readonly Action<object> _execute;
-        private readonly Predicate<object> _canExecute;
+        private readonly Action<object?> _execute;
+        private readonly Predicate<object?>? _canExecute;
 
-        public Action<Action<object, RoutedEventArgs>, RoutedEventArgs> OnExtractZipClick { get; }
-        public Func<object, bool> CanExecuteSelectBuildAction { get; }
-
-        public RelayCommand(Action<object> execute, Predicate<object> canExecute = null)
+        public RelayCommand(Action<object?> execute, Predicate<object?>? canExecute = null)
         {
             _execute = execute;
             _canExecute = canExecute;
         }
 
-        public bool CanExecute(object parameter) => _canExecute == null || _canExecute(parameter);
-        public void Execute(object parameter) => _execute(parameter);
+        public bool CanExecute(object? parameter) => _canExecute == null || _canExecute(parameter);
+        public void Execute(object? parameter) => _execute(parameter);
 
-        public event EventHandler CanExecuteChanged
+        public event EventHandler? CanExecuteChanged
+        {
+            add => CommandManager.RequerySuggested += value;
+            remove => CommandManager.RequerySuggested -= value;
+        }
+    }
+
+    // Command for async operations. Guards against re-entrancy while the task is running and
+    // automatically re-queries CanExecute when it starts/finishes so busy buttons disable themselves.
+    public class AsyncRelayCommand : ICommand
+    {
+        private readonly Func<object?, Task> _execute;
+        private readonly Predicate<object?>? _canExecute;
+        private bool _isExecuting;
+
+        public AsyncRelayCommand(Func<object?, Task> execute, Predicate<object?>? canExecute = null)
+        {
+            _execute = execute;
+            _canExecute = canExecute;
+        }
+
+        public bool CanExecute(object? parameter) => !_isExecuting && (_canExecute == null || _canExecute(parameter));
+
+        public async void Execute(object? parameter)
+        {
+            _isExecuting = true;
+            CommandManager.InvalidateRequerySuggested();
+            try
+            {
+                await _execute(parameter);
+            }
+            finally
+            {
+                _isExecuting = false;
+                CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        public event EventHandler? CanExecuteChanged
         {
             add => CommandManager.RequerySuggested += value;
             remove => CommandManager.RequerySuggested -= value;
