@@ -9,7 +9,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Folder Include="ServerFiles\" />
+    <PackageReference Include="WpfAnimatedGif" Version="2.0.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Servers\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
