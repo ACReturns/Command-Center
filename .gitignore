@@ -1,10 +1,14 @@
-.vs/CommandCenter/v17/.suo
-*.db
-*.v2
-/obj/Release
-/obj/Debug
-/.vs/CommandCenter/CopilotIndices
-/.vs/CommandCenter/DesignTimeBuild
-/.vs/CommandCenter/v17
-/.vs/ProjectEvaluation
-/Properties/PublishProfiles
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS junk
+.DS_Store
+Thumbs.db
