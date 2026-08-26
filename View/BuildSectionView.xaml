@@ -30,6 +30,8 @@
         <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,12" IsEnabled="{Binding IsNotBusy}">
             <RadioButton Content="New Build" Margin="0,0,16,0" IsChecked="{Binding IsNewBuild}" VerticalAlignment="Center"/>
             <RadioButton Content="Patch" Margin="0,0,16,0" IsChecked="{Binding IsPatch}" VerticalAlignment="Center"/>
+            <RadioButton Content="Pushed to Live" Margin="0,0,16,0" IsChecked="{Binding IsPushedToLive}" VerticalAlignment="Center"
+                         Visibility="{Binding SupportsPushedToLive, Converter={StaticResource BoolToVis}}"/>
             <RadioButton Content="Launch" IsChecked="{Binding IsLaunch}" VerticalAlignment="Center"/>
         </StackPanel>
 
@@ -49,6 +51,28 @@
                 <TextBox Text="{Binding PendingVersion, UpdateSourceTrigger=PropertyChanged}" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12"/>
 
                 <Button Content="{Binding RunButtonLabel}" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding RunUpdateCommand}"/>
+            </StackPanel>
+
+            <!-- Pushed to Live panel: only reachable on Live Service sections (see the radio button's
+                 SupportsPushedToLive-bound visibility). Moves a picked folder's contents into this
+                 section's Current Build folder instead of extracting an archive. -->
+            <StackPanel Visibility="{Binding IsPushedToLivePanelVisible, Converter={StaticResource BoolToVis}}">
+                <TextBlock Text="Not configured. Set this section's build path in the Settings tab first." Foreground="#FFB00000" Margin="0,0,0,8"
+                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+
+                <TextBlock Text="Folder to Push to Live" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <DockPanel Margin="0,0,0,8">
+                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowsePushSourceCommand}"/>
+                    <TextBox Text="{Binding PushSourceFolderPath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                </DockPanel>
+
+                <TextBlock Text="This clears the Current Build folder above first, then moves everything from the selected folder into it. This can't be undone."
+                           Foreground="#FFB00000" TextWrapping="Wrap" Margin="0,0,0,12"/>
+
+                <TextBlock Text="Set Version Number To (optional)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBox Text="{Binding PendingVersion, UpdateSourceTrigger=PropertyChanged}" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12"/>
+
+                <Button Content="Push to Live" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding PushToLiveCommand}"/>
             </StackPanel>
 
             <!-- Launch panel: fixed executable choice + this section's own fixed server list -->

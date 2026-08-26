@@ -1,20 +1,36 @@
 using System.Windows;
-using System.Windows.Media;
-using CommandCenter.Helpers;
+using System.Windows.Shell;
 
 namespace CommandCenter
 {
     public partial class MainWindow : Window
     {
-        // Orange caption with black text so both the title text and the window icon read clearly
-        // against it. Windows 11 only (see TitleBarColorHelper) - no-ops harmlessly on Windows 10.
-        private static readonly Color TitleBarCaptionColor = Color.FromRgb(0xFF, 0x8C, 0x00);
-        private static readonly Color TitleBarTextColor = Colors.Black;
-
         public MainWindow()
         {
             InitializeComponent();
-            TitleBarColorHelper.TryApplyTitleBarColors(this, TitleBarCaptionColor, TitleBarTextColor);
+            StateChanged += (_, _) => UpdateMaximizeRestoreToolTip();
+            UpdateMaximizeRestoreToolTip();
+        }
+
+        private void MinimizeButton_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);
+
+        private void MaximizeRestoreButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (WindowState == WindowState.Maximized)
+            {
+                SystemCommands.RestoreWindow(this);
+            }
+            else
+            {
+                SystemCommands.MaximizeWindow(this);
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e) => SystemCommands.CloseWindow(this);
+
+        private void UpdateMaximizeRestoreToolTip()
+        {
+            MaximizeRestoreButton.ToolTip = WindowState == WindowState.Maximized ? "Restore" : "Maximize";
         }
     }
 }

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace CommandCenter.Model
@@ -38,6 +39,24 @@ namespace CommandCenter.Model
             new("Staging (NA)", "GameLaunching 44.234.170.29 8484"),
             new("Staging (EU)", "GameLaunching 3.77.198.24 8484"),
             new("Staging (World Merge)", "GameLaunching 44.234.182.79 8484"),
+        };
+
+        // An extra (user-added) section behaves exactly like its parent category: same server
+        // catalog, same client executables. This is how that's looked up by category.
+        public static IReadOnlyList<LaunchServerOption> ServersFor(SectionCategory category) => category switch
+        {
+            SectionCategory.Gms => GmsServers,
+            SectionCategory.Cms => CmsServers,
+            SectionCategory.Live => LiveServers,
+            _ => Array.Empty<LaunchServerOption>()
+        };
+
+        public static string DisplayName(SectionCategory category) => category switch
+        {
+            SectionCategory.Gms => "GMS",
+            SectionCategory.Cms => "CMS",
+            SectionCategory.Live => "Live Service",
+            _ => category.ToString()
         };
     }
 }

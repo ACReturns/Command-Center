@@ -1,3 +1,7 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Linq;
 using CommandCenter.Model;
 using CommandCenter.Services;
 
@@ -5,25 +9,38 @@ namespace CommandCenter.ViewModel
 {
     public class MainViewModel : ViewModelBase
     {
+        private readonly AppSettings _appSettings;
+        private readonly SettingsService _settingsService;
+
+        // Tab-side BuildSectionViewModel for each extra section, keyed by its ExtraSectionSettings.Id
+        // so a delete from Settings can find and remove exactly the right one from its tab.
+        private readonly Dictionary<Guid, BuildSectionViewModel> _extraViewModelsById = new();
+
         private int _selectedTabIndex;
         private DiskSpaceStatus? _storageStatus;
 
         public MainViewModel()
         {
-            var settingsService = new SettingsService();
-            var appSettings = settingsService.Load();
+            _settingsService = new SettingsService();
+            _appSettings = _settingsService.Load();
 
-            Gms = new BuildSectionViewModel("GMS", appSettings.Gms, appSettings, settingsService, LaunchServerCatalog.GmsServers);
-            Cms = new BuildSectionViewModel("CMS", appSettings.Cms, appSettings, settingsService, LaunchServerCatalog.CmsServers);
-            Live = new BuildSectionViewModel("Live Service", appSettings.Live, appSettings, settingsService, LaunchServerCatalog.LiveServers);
-            Settings = new SettingsViewModel(appSettings, settingsService);
+            Gms = new BuildSectionViewModel("GMS", _appSettings.Gms, _appSettings, _settingsService, LaunchServerCatalog.GmsServers, supportsPushedToLive: false);
+            Cms = new BuildSectionViewModel("CMS", _appSettings.Cms, _appSettings, _settingsService, LaunchServerCatalog.CmsServers, supportsPushedToLive: false);
+            Live = new BuildSectionViewModel("Live Service", _appSettings.Live, _appSettings, _settingsService, LaunchServerCatalog.LiveServers, supportsPushedToLive: true);
+            Settings = new SettingsViewModel(_appSettings, _settingsService, AddExtraSection, RemoveExtraSection);
             ServerStatus = new ServerStatusViewModel(() => SelectedTabIndex = 0);
 
             // Any section's completed build/patch refreshes the storage tracker; whichever one
             // finishes most recently is what the single tracker at the bottom of the window shows.
-            Gms.DiskSpaceStatusChanged += (_, status) => StorageStatus = status;
-            Cms.DiskSpaceStatusChanged += (_, status) => StorageStatus = status;
-            Live.DiskSpaceStatusChanged += (_, status) => StorageStatus = status;
+            Gms.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+            Cms.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+            Live.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+
+            // Rehydrate any extra sections saved from a previous session into their tab.
+            foreach (var extra in _appSettings.ExtraSections.ToList())
+            {
+                CreateExtraSectionViewModel(extra);
+            }
 
             // Startup check so the tracker has a real number before any build ever runs, rather
             // than sitting blank until the first extraction. Uses whichever section already has a
@@ -44,6 +61,12 @@ namespace CommandCenter.ViewModel
         public BuildSectionViewModel Live { get; }
         public SettingsViewModel Settings { get; }
         public ServerStatusViewModel ServerStatus { get; }
+
+        // Extra (user-added) build sections, grouped by which permanent tab they render under as
+        // additional rows. Settings can add/remove from these at any time.
+        public ObservableCollection<BuildSectionViewModel> GmsExtras { get; } = new();
+        public ObservableCollection<BuildSectionViewModel> CmsExtras { get; } = new();
+        public ObservableCollection<BuildSectionViewModel> LiveExtras { get; } = new();
 
         public int SelectedTabIndex
         {
@@ -72,5 +95,57 @@ namespace CommandCenter.ViewModel
         };
 
         public bool IsStorageLow => StorageStatus?.IsLow ?? false;
+
+        private void OnDiskSpaceStatusChanged(object? sender, DiskSpaceStatus? status) => StorageStatus = status;
+
+        // Adds a new extra build section under the given category: persists it immediately, then
+        // wires a full New Build/Patch/Launch row into that category's tab. Called from Settings
+        // when "+ Add Build Path" -> a category is picked from the dropdown.
+        private ExtraSectionSettings AddExtraSection(SectionCategory category)
+        {
+            int existingCount = _appSettings.ExtraSections.Count(x => x.Category == category);
+            var extra = new ExtraSectionSettings
+            {
+                Category = category,
+                Label = $"{LaunchServerCatalog.DisplayName(category)} Extra {existingCount + 1}"
+            };
+
+            _appSettings.ExtraSections.Add(extra);
+            _settingsService.Save(_appSettings);
+
+            CreateExtraSectionViewModel(extra);
+            return extra;
+        }
+
+        // Removes an extra build section: un-persists it and pulls its row out of whichever tab
+        // it was in. This is the only way an extra section goes away - its tab row has no delete
+        // option of its own.
+        private void RemoveExtraSection(ExtraSectionSettings extra)
+        {
+            _appSettings.ExtraSections.Remove(extra);
+            _settingsService.Save(_appSettings);
+
+            if (_extraViewModelsById.Remove(extra.Id, out var vm))
+            {
+                vm.DiskSpaceStatusChanged -= OnDiskSpaceStatusChanged;
+                ExtrasFor(extra.Category).Remove(vm);
+            }
+        }
+
+        private void CreateExtraSectionViewModel(ExtraSectionSettings extra)
+        {
+            var vm = new BuildSectionViewModel(extra.Label, extra, _appSettings, _settingsService, LaunchServerCatalog.ServersFor(extra.Category), supportsPushedToLive: extra.Category == SectionCategory.Live);
+            vm.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+            _extraViewModelsById[extra.Id] = vm;
+            ExtrasFor(extra.Category).Add(vm);
+        }
+
+        private ObservableCollection<BuildSectionViewModel> ExtrasFor(SectionCategory category) => category switch
+        {
+            SectionCategory.Gms => GmsExtras,
+            SectionCategory.Cms => CmsExtras,
+            SectionCategory.Live => LiveExtras,
+            _ => GmsExtras
+        };
     }
 }

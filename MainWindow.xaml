@@ -3,11 +3,65 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:ViewModel="clr-namespace:CommandCenter.ViewModel"
         xmlns:View="clr-namespace:CommandCenter.View"
         mc:Ignorable="d"
         Title="Maple Central" Height="640" Width="820" MinHeight="500" MinWidth="720"
-        Icon="img/AppIcon.ico">
+        Icon="img/AppIcon.ico"
+        WindowStyle="None"
+        ResizeMode="CanResize">
+
+    <!-- Custom chrome instead of native: this is what makes the title text bold-able (Windows has
+         no per-app "bold" switch for the native caption font). WindowChrome still gives us free,
+         correct drag / double-click-maximize / Aero-snap / resize via CaptionHeight + ResizeBorderThickness
+         below - only the 3 caption buttons are marked hit-test-visible so they get real clicks instead
+         of being swallowed by the drag region. -->
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="32" ResizeBorderThickness="6" GlassFrameThickness="0" CornerRadius="0" UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="TitleBarButtonStyle" TargetType="Button">
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="Black"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#33000000"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="TitleBarCloseButtonStyle" TargetType="Button" BasedOn="{StaticResource TitleBarButtonStyle}">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bg" Background="{TemplateBinding Background}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bg" Property="Background" Value="#FFE81123"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
 
     <Window.DataContext>
         <ViewModel:MainViewModel/>
@@ -19,11 +73,38 @@
             <ColumnDefinition Width="161*"/>
         </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
+            <RowDefinition Height="32"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <TabControl Grid.Row="0" Grid.ColumnSpan="2" SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6">
+        <!-- Custom title bar: orange, bold black text, icon, min/max/close. The empty space here
+             (everything except the 3 buttons) is the WindowChrome CaptionHeight drag region. -->
+        <Grid Grid.Row="0" Grid.ColumnSpan="2" Background="#FFFF8C00">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Image Grid.Column="0" Source="img/AppIcon.ico" Width="16" Height="16" Margin="10,0,6,0" VerticalAlignment="Center"/>
+            <TextBlock Grid.Column="1" Text="{Binding RelativeSource={RelativeSource AncestorType=Window}, Path=Title}"
+                       FontWeight="Bold" FontSize="13" Foreground="Black" VerticalAlignment="Center"/>
+
+            <Button Grid.Column="2" x:Name="MinimizeButton" Content="&#x2212;" ToolTip="Minimize"
+                    Style="{StaticResource TitleBarButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                    Click="MinimizeButton_Click"/>
+            <Button Grid.Column="3" x:Name="MaximizeRestoreButton" Content="&#x25A1;" ToolTip="Maximize"
+                    Style="{StaticResource TitleBarButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                    Click="MaximizeRestoreButton_Click"/>
+            <Button Grid.Column="4" x:Name="CloseButton" Content="&#x2715;" ToolTip="Close"
+                    Style="{StaticResource TitleBarCloseButtonStyle}" shell:WindowChrome.IsHitTestVisibleInChrome="True"
+                    Click="CloseButton_Click"/>
+        </Grid>
+
+        <TabControl Grid.Row="1" Grid.ColumnSpan="2" SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6">
             <TabItem>
                 <TabItem.Header>
                     <StackPanel Orientation="Horizontal">
@@ -31,7 +112,20 @@
                         <TextBlock Text="GMS" VerticalAlignment="Center"/>
                     </StackPanel>
                 </TabItem.Header>
-                <View:BuildSectionView DataContext="{Binding Gms}"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <View:BuildSectionView DataContext="{Binding Gms}"/>
+                        <ItemsControl ItemsSource="{Binding GmsExtras}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
+                                        <View:BuildSectionView DataContext="{Binding}"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
             <TabItem>
                 <TabItem.Header>
@@ -40,7 +134,20 @@
                         <TextBlock Text="CMS" VerticalAlignment="Center"/>
                     </StackPanel>
                 </TabItem.Header>
-                <View:BuildSectionView DataContext="{Binding Cms}"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <View:BuildSectionView DataContext="{Binding Cms}"/>
+                        <ItemsControl ItemsSource="{Binding CmsExtras}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
+                                        <View:BuildSectionView DataContext="{Binding}"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
             <TabItem>
                 <TabItem.Header>
@@ -49,7 +156,20 @@
                         <TextBlock Text="Live Service Builds" VerticalAlignment="Center"/>
                     </StackPanel>
                 </TabItem.Header>
-                <View:BuildSectionView DataContext="{Binding Live}"/>
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel>
+                        <View:BuildSectionView DataContext="{Binding Live}"/>
+                        <ItemsControl ItemsSource="{Binding LiveExtras}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
+                                        <View:BuildSectionView DataContext="{Binding}"/>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </ScrollViewer>
             </TabItem>
             <TabItem>
                 <TabItem.Header>
@@ -74,7 +194,7 @@
         <!-- Storage tracker: always visible, carries across every tab. Shows free space on
              whichever section's build drive was checked most recently (startup, or the last
              completed extraction); switches to a warning style once that drive drops under 70GB. -->
-        <Border Grid.Row="1" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6">
+        <Border Grid.Row="2" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6">
             <Border.Style>
                 <Style TargetType="Border">
                     <Setter Property="Background" Value="#FFF0F0F0"/>

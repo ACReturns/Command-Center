@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:Model="clr-namespace:CommandCenter.Model"
              mc:Ignorable="d" d:DesignWidth="740">
     <UserControl.Resources>
         <Style x:Key="SectionCard" TargetType="Border">
@@ -15,55 +16,101 @@
         </Style>
     </UserControl.Resources>
 
-    <StackPanel Margin="16">
-        <TextBlock Text="Build Paths &amp; Versions" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
-        <TextBlock Text="The build path is only editable here. It appears read-only in each section's tab." Foreground="#FF666666" Margin="0,0,0,12"/>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel Margin="16">
+            <TextBlock Text="Build Paths &amp; Versions" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+            <TextBlock Text="The build path is only editable here. It appears read-only in each section's tab." Foreground="#FF666666" Margin="0,0,0,12"/>
 
-        <Border Style="{StaticResource SectionCard}">
-            <StackPanel>
-                <TextBlock Text="GMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <DockPanel Margin="0,0,0,6">
-                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseGmsPathCommand}"/>
-                    <TextBox Text="{Binding Gms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                </DockPanel>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Text="{Binding Gms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel>
+                    <TextBlock Text="GMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <DockPanel Margin="0,0,0,6">
+                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseGmsPathCommand}"/>
+                        <TextBox Text="{Binding Gms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox Text="{Binding Gms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
-        </Border>
+            </Border>
 
-        <Border Style="{StaticResource SectionCard}">
-            <StackPanel>
-                <TextBlock Text="CMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <DockPanel Margin="0,0,0,6">
-                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCmsPathCommand}"/>
-                    <TextBox Text="{Binding Cms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                </DockPanel>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Text="{Binding Cms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel>
+                    <TextBlock Text="CMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <DockPanel Margin="0,0,0,6">
+                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCmsPathCommand}"/>
+                        <TextBox Text="{Binding Cms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox Text="{Binding Cms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
-        </Border>
+            </Border>
 
-        <Border Style="{StaticResource SectionCard}">
-            <StackPanel>
-                <TextBlock Text="Live Service" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <DockPanel Margin="0,0,0,6">
-                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseLivePathCommand}"/>
-                    <TextBox Text="{Binding Live.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                </DockPanel>
-                <StackPanel Orientation="Horizontal">
-                    <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                    <TextBox Text="{Binding Live.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel>
+                    <TextBlock Text="Live Service" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                    <DockPanel Margin="0,0,0,6">
+                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseLivePathCommand}"/>
+                        <TextBox Text="{Binding Live.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <TextBox Text="{Binding Live.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                    </StackPanel>
                 </StackPanel>
-            </StackPanel>
-        </Border>
+            </Border>
 
-        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-            <Button Content="Save Settings" Width="140" Padding="8,4" Command="{Binding SaveCommand}"/>
-            <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF2E7D32"/>
+            <!-- Extra (user-added) build paths - each of these can be deleted; GMS/CMS/Live above cannot. -->
+            <ItemsControl ItemsSource="{Binding ExtraSections}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource SectionCard}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,6">
+                                    <Button Content="Delete" DockPanel.Dock="Right" Width="70" Padding="4,2"
+                                            Background="#FFFDECEA" Command="{Binding DeleteCommand}"/>
+                                    <TextBlock Text="{Binding Settings.Label}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                </DockPanel>
+                                <DockPanel Margin="0,0,0,6">
+                                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
+                                    <TextBox Text="{Binding Settings.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                    <TextBox Text="{Binding Settings.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <!-- A ContextMenu is a separate popup root, not part of the button's visual tree, so it
+                 does NOT inherit DataContext the normal way - each MenuItem's Command binds through
+                 PlacementTarget (set to the button in code-behind) to reach SettingsViewModel. -->
+            <Button Content="+ Add Build Path" Width="160" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12" Click="AddBuildPathButton_Click">
+                <Button.ContextMenu>
+                    <ContextMenu Placement="Bottom">
+                        <MenuItem Header="GMS"
+                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{x:Static Model:SectionCategory.Gms}"/>
+                        <MenuItem Header="CMS"
+                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{x:Static Model:SectionCategory.Cms}"/>
+                        <MenuItem Header="Live Service Builds"
+                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                  CommandParameter="{x:Static Model:SectionCategory.Live}"/>
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
+
+            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                <Button Content="Save Settings" Width="140" Padding="8,4" Command="{Binding SaveCommand}"/>
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF2E7D32"/>
+            </StackPanel>
         </StackPanel>
-    </StackPanel>
+    </ScrollViewer>
 </UserControl>
