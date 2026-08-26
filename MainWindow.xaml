@@ -6,14 +6,19 @@
         xmlns:ViewModel="clr-namespace:CommandCenter.ViewModel"
         xmlns:View="clr-namespace:CommandCenter.View"
         mc:Ignorable="d"
-        Title="Command Center" Height="640" Width="820" MinHeight="500" MinWidth="720">
+        Title="Command Center" Height="640" Width="820" MinHeight="500" MinWidth="720"
+        Icon="img/AppIcon.ico">
 
     <Window.DataContext>
         <ViewModel:MainViewModel/>
     </Window.DataContext>
 
     <Grid>
-        <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="6">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="3*"/>
+            <ColumnDefinition Width="161*"/>
+        </Grid.ColumnDefinitions>
+        <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6" Grid.ColumnSpan="2">
             <TabItem Header="GMS">
                 <View:BuildSectionView DataContext="{Binding Gms}"/>
             </TabItem>

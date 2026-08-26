@@ -1,9 +1,10 @@
 using System;
-using System.Collections.ObjectModel;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using CommandCenter.Model;
@@ -20,51 +21,42 @@ namespace CommandCenter.ViewModel
     }
 
     // Drives one section's tab (GMS / CMS / Live Service). The same view is reused for all
-    // three sections; only the wrapped SectionSettings instance and title differ.
+    // three sections; only the wrapped SectionSettings instance, title, and server catalog
+    // differ. Every section launches by picking one of two fixed client executables plus a
+    // server from that section's own fixed catalog (see LaunchServerCatalog).
     public class BuildSectionViewModel : ViewModelBase
     {
         private readonly SettingsService _settingsService;
         private readonly AppSettings _appSettings;
         private readonly SectionSettings _settings;
 
-        private static readonly string[] FixedExecutableOptions = { "MapleStoryA.exe", "MapleStory.exe" };
-
         private SectionMode _selectedMode = SectionMode.Launch;
-        private string _sourceZipPath = string.Empty;
+        private string _sourceArchivePath = string.Empty;
         private string _pendingVersion = string.Empty;
         private bool _isBusy;
         private double _progressPercent;
         private string _statusText = string.Empty;
-        private string? _selectedLaunchTarget;
         private string? _selectedExecutable;
         private LaunchServerOption? _selectedServerOption;
+        private CancellationTokenSource? _updateCancellation;
 
-        public BuildSectionViewModel(string sectionTitle, SectionSettings settings, AppSettings appSettings, SettingsService settingsService, bool useFixedLaunchCatalog)
+        public BuildSectionViewModel(string sectionTitle, SectionSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions)
         {
             SectionTitle = sectionTitle;
             _settings = settings;
             _appSettings = appSettings;
             _settingsService = settingsService;
-            UsesFixedLaunchCatalog = useFixedLaunchCatalog;
+            ServerOptions = serverOptions;
 
             _settings.PropertyChanged += Settings_PropertyChanged;
 
             BrowseSourceCommand = new RelayCommand(_ => BrowseSource());
-            RunUpdateCommand = new AsyncRelayCommand(_ => RunUpdateAsync(), _ => !IsBusy && !string.IsNullOrWhiteSpace(SourceZipPath) && HasBuildPath);
-            LaunchCommand = new RelayCommand(_ => Launch(), _ => !IsBusy && HasBuildPath && (UsesFixedLaunchCatalog
-                ? SelectedExecutable != null && SelectedServerOption != null
-                : !string.IsNullOrWhiteSpace(SelectedLaunchTarget)));
-            RefreshLaunchTargetsCommand = new RelayCommand(_ => RefreshLaunchTargets());
+            RunUpdateCommand = new AsyncRelayCommand(_ => RunUpdateAsync(), _ => !IsBusy && !string.IsNullOrWhiteSpace(SourceArchivePath) && HasBuildPath);
+            CancelUpdateCommand = new RelayCommand(_ => _updateCancellation?.Cancel(), _ => IsBusy && _updateCancellation != null);
+            LaunchCommand = new RelayCommand(_ => Launch(), _ => !IsBusy && HasBuildPath && SelectedExecutable != null && SelectedServerOption != null);
 
-            if (UsesFixedLaunchCatalog)
-            {
-                _selectedExecutable = ExecutableOptions.FirstOrDefault();
-                _selectedServerOption = ServerOptions.FirstOrDefault();
-            }
-            else
-            {
-                RefreshLaunchTargets();
-            }
+            _selectedExecutable = ExecutableOptions.FirstOrDefault();
+            _selectedServerOption = ServerOptions.FirstOrDefault();
         }
 
         public string SectionTitle { get; }
@@ -86,11 +78,6 @@ namespace CommandCenter.ViewModel
                     OnPropertyChanged(nameof(IsUpdatePanelVisible));
                     OnPropertyChanged(nameof(IsLaunchPanelVisible));
                     OnPropertyChanged(nameof(RunButtonLabel));
-
-                    if (value == SectionMode.Launch && !UsesFixedLaunchCatalog)
-                    {
-                        RefreshLaunchTargets();
-                    }
                 }
             }
         }
@@ -117,10 +104,10 @@ namespace CommandCenter.ViewModel
         public bool IsLaunchPanelVisible => SelectedMode == SectionMode.Launch;
         public string RunButtonLabel => SelectedMode == SectionMode.NewBuild ? "Apply New Build" : "Apply Patch";
 
-        public string SourceZipPath
+        public string SourceArchivePath
         {
-            get => _sourceZipPath;
-            set => SetProperty(ref _sourceZipPath, value);
+            get => _sourceArchivePath;
+            set => SetProperty(ref _sourceArchivePath, value);
         }
 
         public string PendingVersion
@@ -155,19 +142,11 @@ namespace CommandCenter.ViewModel
             set => SetProperty(ref _statusText, value);
         }
 
-        public ObservableCollection<string> LaunchTargets { get; } = new();
+        // Same 2 client executables for every section (GMS / CMS / Live Service).
+        public IReadOnlyList<string> ExecutableOptions => LaunchServerCatalog.Executables;
 
-        public string? SelectedLaunchTarget
-        {
-            get => _selectedLaunchTarget;
-            set => SetProperty(ref _selectedLaunchTarget, value);
-        }
-
-        // True for GMS/CMS: a fixed executable + fixed QA server picker instead of a folder scan.
-        public bool UsesFixedLaunchCatalog { get; }
-
-        public IReadOnlyList<string> ExecutableOptions => FixedExecutableOptions;
-        public IReadOnlyList<LaunchServerOption> ServerOptions => LaunchServerCatalog.Servers;
+        // This section's own fixed server catalog (GMS, CMS, and Live each get their own).
+        public IReadOnlyList<LaunchServerOption> ServerOptions { get; }
 
         public string? SelectedExecutable
         {
@@ -188,13 +167,13 @@ namespace CommandCenter.ViewModel
         }
 
         public bool IsSelectedExecutableMissing =>
-            UsesFixedLaunchCatalog && HasBuildPath && !string.IsNullOrEmpty(SelectedExecutable) &&
+            HasBuildPath && !string.IsNullOrEmpty(SelectedExecutable) &&
             !File.Exists(Path.Combine(CurrentBuildPath, SelectedExecutable));
 
         public RelayCommand BrowseSourceCommand { get; }
         public AsyncRelayCommand RunUpdateCommand { get; }
+        public RelayCommand CancelUpdateCommand { get; }
         public RelayCommand LaunchCommand { get; }
-        public RelayCommand RefreshLaunchTargetsCommand { get; }
 
         private void Settings_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
@@ -202,11 +181,6 @@ namespace CommandCenter.ViewModel
             OnPropertyChanged(nameof(VersionNumber));
             OnPropertyChanged(nameof(HasBuildPath));
             OnPropertyChanged(nameof(IsSelectedExecutableMissing));
-
-            if (e.PropertyName == nameof(SectionSettings.BuildPath) && !UsesFixedLaunchCatalog)
-            {
-                RefreshLaunchTargets();
-            }
         }
 
         private void BrowseSource()
@@ -214,38 +188,14 @@ namespace CommandCenter.ViewModel
             var dialog = new OpenFileDialog
             {
                 Title = $"Select {SectionTitle} build/patch archive",
-                Filter = "Zip Archives (*.zip)|*.zip",
+                Filter = "Build/Patch Archives (*.zip;*.7z)|*.zip;*.7z|Zip Archives (*.zip)|*.zip|7-Zip Archives (*.7z)|*.7z",
                 CheckFileExists = true
             };
 
             if (dialog.ShowDialog() == true)
             {
-                SourceZipPath = dialog.FileName;
+                SourceArchivePath = dialog.FileName;
             }
-        }
-
-        private void RefreshLaunchTargets()
-        {
-            LaunchTargets.Clear();
-
-            if (string.IsNullOrWhiteSpace(CurrentBuildPath) || !Directory.Exists(CurrentBuildPath))
-            {
-                return;
-            }
-
-            var launchers = Directory.GetFiles(CurrentBuildPath, "*.bat")
-                .Concat(Directory.GetFiles(CurrentBuildPath, "*.exe"))
-                .Select(Path.GetFileName)
-                .Where(name => !string.IsNullOrEmpty(name))
-                .Select(name => name!)
-                .OrderBy(name => name);
-
-            foreach (var launcher in launchers)
-            {
-                LaunchTargets.Add(launcher);
-            }
-
-            SelectedLaunchTarget = LaunchTargets.FirstOrDefault();
         }
 
         private async Task RunUpdateAsync()
@@ -270,6 +220,11 @@ namespace CommandCenter.ViewModel
             ProgressPercent = 0;
             StatusText = "Starting...";
 
+            // BuildUpdateService now runs the whole extraction/copy on a background thread, so the
+            // window stays movable and every tab (including this section's own) stays usable while
+            // this runs. The token lets the user back out of a long-running one via CancelUpdateCommand.
+            _updateCancellation = new CancellationTokenSource();
+
             var progress = new Progress<UpdateProgress>(p =>
             {
                 ProgressPercent = p.PercentComplete;
@@ -278,7 +233,7 @@ namespace CommandCenter.ViewModel
 
             try
             {
-                await BuildUpdateService.RunAsync(SourceZipPath, CurrentBuildPath, mode, progress);
+                await BuildUpdateService.RunAsync(SourceArchivePath, CurrentBuildPath, mode, progress, _updateCancellation.Token);
 
                 if (!string.IsNullOrWhiteSpace(PendingVersion))
                 {
@@ -288,11 +243,10 @@ namespace CommandCenter.ViewModel
                 }
 
                 StatusText = $"{SectionTitle} updated successfully.";
-
-                if (!UsesFixedLaunchCatalog)
-                {
-                    RefreshLaunchTargets();
-                }
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = $"{SectionTitle} update cancelled.";
             }
             catch (Exception ex)
             {
@@ -302,22 +256,12 @@ namespace CommandCenter.ViewModel
             finally
             {
                 IsBusy = false;
+                _updateCancellation?.Dispose();
+                _updateCancellation = null;
             }
         }
 
         private void Launch()
-        {
-            if (UsesFixedLaunchCatalog)
-            {
-                LaunchWithCatalog();
-            }
-            else
-            {
-                LaunchGeneric();
-            }
-        }
-
-        private void LaunchWithCatalog()
         {
             if (string.IsNullOrEmpty(SelectedExecutable) || SelectedServerOption == null)
             {
@@ -343,32 +287,6 @@ namespace CommandCenter.ViewModel
                 process.Start();
 
                 StatusText = $"Launched {SelectedExecutable} -> {SelectedServerOption.DisplayName}.";
-            }
-            catch (Exception ex)
-            {
-                StatusText = $"Launch failed: {ex.Message}";
-                MessageBox.Show(ex.Message, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void LaunchGeneric()
-        {
-            if (string.IsNullOrWhiteSpace(SelectedLaunchTarget))
-            {
-                return;
-            }
-
-            string fullPath = Path.Combine(CurrentBuildPath, SelectedLaunchTarget);
-
-            try
-            {
-                var process = new Process();
-                process.StartInfo.FileName = fullPath;
-                process.StartInfo.WorkingDirectory = CurrentBuildPath;
-                process.StartInfo.UseShellExecute = true;
-                process.Start();
-
-                StatusText = $"Launched {SelectedLaunchTarget}.";
             }
             catch (Exception ex)
             {

@@ -11,9 +11,9 @@ namespace CommandCenter.ViewModel
             var settingsService = new SettingsService();
             var appSettings = settingsService.Load();
 
-            Gms = new BuildSectionViewModel("GMS", appSettings.Gms, appSettings, settingsService, useFixedLaunchCatalog: true);
-            Cms = new BuildSectionViewModel("CMS", appSettings.Cms, appSettings, settingsService, useFixedLaunchCatalog: true);
-            Live = new BuildSectionViewModel("Live Service", appSettings.Live, appSettings, settingsService, useFixedLaunchCatalog: false);
+            Gms = new BuildSectionViewModel("GMS", appSettings.Gms, appSettings, settingsService, LaunchServerCatalog.GmsServers);
+            Cms = new BuildSectionViewModel("CMS", appSettings.Cms, appSettings, settingsService, LaunchServerCatalog.CmsServers);
+            Live = new BuildSectionViewModel("Live Service", appSettings.Live, appSettings, settingsService, LaunchServerCatalog.LiveServers);
             Settings = new SettingsViewModel(appSettings, settingsService);
             ServerStatus = new ServerStatusViewModel(() => SelectedTabIndex = 0);
         }

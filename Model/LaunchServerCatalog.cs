@@ -2,20 +2,39 @@ using System.Collections.Generic;
 
 namespace CommandCenter.Model
 {
-    // Fixed set of QA connection targets offered when launching a GMS/CMS build. The argument
-    // string is passed to the client executable exactly as-is at launch time.
+    // Fixed sets of QA/live connection targets offered when launching a GMS/CMS/Live Service
+    // build, plus the fixed set of client executables all three sections can launch. Each
+    // LaunchArgument string is passed to the client executable exactly as-is at launch time.
     public static class LaunchServerCatalog
     {
-        public static IReadOnlyList<LaunchServerOption> Servers { get; } = new List<LaunchServerOption>
+        public static IReadOnlyList<string> Executables { get; } = new List<string>
+        {
+            "MapleStoryA.exe",
+            "MapleStory.exe",
+        };
+
+        // GMS: everything except Test 4 - Test 4 is reserved for Live Service Builds.
+        public static IReadOnlyList<LaunchServerOption> GmsServers { get; } = new List<LaunchServerOption>
         {
             new("Test 1", "GameLaunching 44.234.170.29 8484"),
             new("Test 2", "GameLaunching 44.234.182.79 8484"),
             new("Test 3", "GameLaunching 54.148.16.230 8484"),
-            new("Test 4", "GameLaunching 54.148.59.7 8484"),
             new("Test 6", "GameLaunching 52.89.167.110 8484"),
             new("Staging (NA)", "GameLaunching 44.234.170.29 8484"),
             new("Staging (EU)", "GameLaunching 3.77.198.24 8484"),
             new("Staging (World Merge)", "GameLaunching 44.234.182.79 8484"),
+        };
+
+        // CMS: its own catalog, independent of GMS's.
+        public static IReadOnlyList<LaunchServerOption> CmsServers { get; } = new List<LaunchServerOption>
+        {
+            new("Test 1", "ipport 10.9.2.132 8484"),
+        };
+
+        // Live Service Builds: Test 4 only.
+        public static IReadOnlyList<LaunchServerOption> LiveServers { get; } = new List<LaunchServerOption>
+        {
+            new("Test 4", "GameLaunching 54.148.59.7 8484"),
         };
     }
 }

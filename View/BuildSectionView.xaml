@@ -39,10 +39,10 @@
                 <TextBlock Text="Not configured. Set this section's build path in the Settings tab first." Foreground="#FFB00000" Margin="0,0,0,8"
                            Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
 
-                <TextBlock Text="Build / Patch Archive (.zip)" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <TextBlock Text="Build / Patch Archive (.zip, .7z)" FontWeight="SemiBold" Margin="0,0,0,4"/>
                 <DockPanel Margin="0,0,0,12">
                     <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseSourceCommand}"/>
-                    <TextBox Text="{Binding SourceZipPath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                    <TextBox Text="{Binding SourceArchivePath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
                 </DockPanel>
 
                 <TextBlock Text="Set Version Number To (optional)" FontWeight="SemiBold" Margin="0,0,0,4"/>
@@ -51,57 +51,44 @@
                 <Button Content="{Binding RunButtonLabel}" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding RunUpdateCommand}"/>
             </StackPanel>
 
-            <!-- Launch panel -->
+            <!-- Launch panel: fixed executable choice + this section's own fixed server list -->
             <StackPanel Visibility="{Binding IsLaunchPanelVisible, Converter={StaticResource BoolToVis}}">
+                <TextBlock Foreground="#FFB00000" Margin="0,0,0,8" Visibility="{Binding IsSelectedExecutableMissing, Converter={StaticResource BoolToVis}}">
+                    <Run Text="{Binding SelectedExecutable, Mode=OneWay}"/>
+                    <Run Text=" was not found in the build folder."/>
+                </TextBlock>
 
-                <!-- GMS/CMS: fixed executable choice + fixed QA server list -->
-                <StackPanel Visibility="{Binding UsesFixedLaunchCatalog, Converter={StaticResource BoolToVis}}">
-                    <TextBlock Foreground="#FFB00000" Margin="0,0,0,8" Visibility="{Binding IsSelectedExecutableMissing, Converter={StaticResource BoolToVis}}">
-                        <Run Text="{Binding SelectedExecutable, Mode=OneWay}"/>
-                        <Run Text=" was not found in the build folder."/>
-                    </TextBlock>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="16"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
 
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="16"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Select Executable" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox ItemsSource="{Binding ExecutableOptions}" SelectedItem="{Binding SelectedExecutable}"/>
+                    </StackPanel>
 
-                        <StackPanel Grid.Column="0">
-                            <TextBlock Text="Select Executable" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <ComboBox ItemsSource="{Binding ExecutableOptions}" SelectedItem="{Binding SelectedExecutable}"/>
-                        </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Select Server" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                        <ComboBox ItemsSource="{Binding ServerOptions}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedServerOption}"/>
+                    </StackPanel>
+                </Grid>
 
-                        <StackPanel Grid.Column="2">
-                            <TextBlock Text="Select Server" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <ComboBox ItemsSource="{Binding ServerOptions}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedServerOption}"/>
-                        </StackPanel>
-                    </Grid>
-
-                    <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Margin="0,12,0,0" Command="{Binding LaunchCommand}"/>
-                </StackPanel>
-
-                <!-- Live Service: launcher scanned from the build folder -->
-                <StackPanel Visibility="{Binding UsesFixedLaunchCatalog, Converter={StaticResource InverseBoolToVis}}">
-                    <TextBlock Text="No launchers (.bat/.exe) found in the current build folder." Foreground="#FFB00000" Margin="0,0,0,8"
-                               Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
-
-                    <TextBlock Text="Select Server / Launcher" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                    <DockPanel Margin="0,0,0,12">
-                        <Button Content="Refresh" DockPanel.Dock="Right" Width="90" Command="{Binding RefreshLaunchTargetsCommand}"/>
-                        <ComboBox ItemsSource="{Binding LaunchTargets}" SelectedItem="{Binding SelectedLaunchTarget}" Margin="0,0,8,0"/>
-                    </DockPanel>
-
-                    <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding LaunchCommand}"/>
-                </StackPanel>
+                <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Margin="0,12,0,0" Command="{Binding LaunchCommand}"/>
             </StackPanel>
         </Grid>
 
-        <!-- Progress / status -->
+        <!-- Progress / status: runs in the background now, so this section (and every other tab,
+             and the window itself) stays fully usable while it's visible. Cancel lets you back out
+             without waiting it out. -->
         <StackPanel Grid.Row="3" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
             <ProgressBar Height="18" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"/>
-            <TextBlock Text="{Binding StatusText}" Margin="0,4,0,0"/>
+            <DockPanel Margin="0,4,0,0">
+                <Button Content="Cancel" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding CancelUpdateCommand}"/>
+                <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
+            </DockPanel>
         </StackPanel>
         <TextBlock Grid.Row="3" Text="{Binding StatusText}" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
     </Grid>
