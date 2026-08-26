@@ -31,10 +31,13 @@ namespace CommandCenter.Model
             new("Test 1", "ipport 10.9.2.132 8484"),
         };
 
-        // Live Service Builds: Test 4 only.
+        // Live Service Builds: Test 4 plus all Staging options.
         public static IReadOnlyList<LaunchServerOption> LiveServers { get; } = new List<LaunchServerOption>
         {
             new("Test 4", "GameLaunching 54.148.59.7 8484"),
+            new("Staging (NA)", "GameLaunching 44.234.170.29 8484"),
+            new("Staging (EU)", "GameLaunching 3.77.198.24 8484"),
+            new("Staging (World Merge)", "GameLaunching 44.234.182.79 8484"),
         };
     }
 }
