@@ -6,7 +6,7 @@
         xmlns:ViewModel="clr-namespace:CommandCenter.ViewModel"
         xmlns:View="clr-namespace:CommandCenter.View"
         mc:Ignorable="d"
-        Title="Command Center" Height="640" Width="820" MinHeight="500" MinWidth="720"
+        Title="Maple Central" Height="640" Width="820" MinHeight="500" MinWidth="720"
         Icon="img/AppIcon.ico">
 
     <Window.DataContext>
@@ -18,22 +18,88 @@
             <ColumnDefinition Width="3*"/>
             <ColumnDefinition Width="161*"/>
         </Grid.ColumnDefinitions>
-        <TabControl SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6" Grid.ColumnSpan="2">
-            <TabItem Header="GMS">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TabControl Grid.Row="0" Grid.ColumnSpan="2" SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="img/Maple.ico" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="GMS" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
                 <View:BuildSectionView DataContext="{Binding Gms}"/>
             </TabItem>
-            <TabItem Header="CMS">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="img/Classic.ico" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="CMS" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
                 <View:BuildSectionView DataContext="{Binding Cms}"/>
             </TabItem>
-            <TabItem Header="Live Service Builds">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="img/Live.ico" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="Live Service Builds" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
                 <View:BuildSectionView DataContext="{Binding Live}"/>
             </TabItem>
-            <TabItem Header="Server Status">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="img/Servers.ico" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="Server Status" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
                 <View:ServerStatusView DataContext="{Binding ServerStatus}"/>
             </TabItem>
-            <TabItem Header="Settings">
+            <TabItem>
+                <TabItem.Header>
+                    <StackPanel Orientation="Horizontal">
+                        <Image Source="img/Settings.ico" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="Settings" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </TabItem.Header>
                 <View:SettingsView DataContext="{Binding Settings}"/>
             </TabItem>
         </TabControl>
+
+        <!-- Storage tracker: always visible, carries across every tab. Shows free space on
+             whichever section's build drive was checked most recently (startup, or the last
+             completed extraction); switches to a warning style once that drive drops under 70GB. -->
+        <Border Grid.Row="1" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="#FFF0F0F0"/>
+                    <Setter Property="BorderBrush" Value="#FFD0D0D0"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsStorageLow}" Value="True">
+                            <Setter Property="Background" Value="#FFFFF3CD"/>
+                            <Setter Property="BorderBrush" Value="#FFE0B400"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <TextBlock Text="{Binding StorageTrackerText}" TextWrapping="Wrap">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#FF404040"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsStorageLow}" Value="True">
+                                <Setter Property="Foreground" Value="#FF7A5B00"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </Border>
     </Grid>
 </Window>

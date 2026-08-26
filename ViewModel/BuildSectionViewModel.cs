@@ -175,6 +175,11 @@ namespace CommandCenter.ViewModel
         public RelayCommand CancelUpdateCommand { get; }
         public RelayCommand LaunchCommand { get; }
 
+        // Raised right after a build/patch finishes extracting, with this section's build-drive
+        // free-space status (or null if it couldn't be checked). MainViewModel subscribes to this
+        // on every section to drive the storage tracker at the bottom of the window.
+        public event EventHandler<DiskSpaceStatus?>? DiskSpaceStatusChanged;
+
         private void Settings_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             OnPropertyChanged(nameof(CurrentBuildPath));
@@ -243,6 +248,9 @@ namespace CommandCenter.ViewModel
                 }
 
                 StatusText = $"{SectionTitle} updated successfully.";
+
+                // Refresh the storage tracker with this section's build drive now that the extraction landed.
+                DiskSpaceStatusChanged?.Invoke(this, DiskSpaceService.CheckDiskSpace(CurrentBuildPath));
             }
             catch (OperationCanceledException)
             {
