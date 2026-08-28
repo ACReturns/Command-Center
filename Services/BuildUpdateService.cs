@@ -76,6 +76,9 @@ namespace CommandCenter.Services
 
                     CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
 
+                    progress.Report(new UpdateProgress("Finalizing build folder...", 97));
+                    FlattenKnownWrapperFolders(destinationBuildPath, cancellationToken);
+
                     progress.Report(new UpdateProgress("Done", 100));
                 }
                 finally
@@ -175,6 +178,76 @@ namespace CommandCenter.Services
                 done++;
                 double pct = 55 + (done / (double)total) * 45; // copy spans 55-100%
                 progress.Report(new UpdateProgress($"Copying build files ({done}/{total})...", pct));
+            }
+        }
+
+        // Some build archives ship "AdminClient" and "Bin" as wrapper folders one level down instead
+        // of laying their contents flat at the top level. A build sitting behind those wrappers isn't
+        // launchable as-is, so after the copy above lands them under destinationBuildPath, pull each
+        // wrapper's contents up into destinationBuildPath itself and remove the now-empty wrapper.
+        // Runs unconditionally (both NewBuild and Patch) since either mode can extract an archive with
+        // this layout, and it's a no-op when a wrapper folder isn't present.
+        private static readonly string[] WrapperFoldersToFlatten = { "AdminClient", "Bin" };
+
+        private static void FlattenKnownWrapperFolders(string destinationBuildPath, CancellationToken cancellationToken)
+        {
+            foreach (var wrapperName in WrapperFoldersToFlatten)
+            {
+                string wrapperPath = Path.Combine(destinationBuildPath, wrapperName);
+                if (!Directory.Exists(wrapperPath))
+                {
+                    continue;
+                }
+
+                MoveDirectoryContents(wrapperPath, destinationBuildPath, cancellationToken);
+
+                try
+                {
+                    Directory.Delete(wrapperPath, recursive: true);
+                }
+                catch
+                {
+                    // Best-effort: if something (AV scanner, an open handle) is still holding the now-
+                    // empty wrapper folder, leave it rather than fail the whole update over it.
+                }
+            }
+        }
+
+        // Moves every file and subfolder out of sourceDir and into destinationDir (both already on
+        // the same volume, since sourceDir is itself a subfolder of destinationDir at this point, so
+        // Directory.Move/File.Move are cheap renames rather than copies). If destinationDir already
+        // has an item with the same name - e.g. the build itself also has a top-level "Bin" folder in
+        // addition to the wrapper - merges into it recursively instead of overwriting it outright.
+        private static void MoveDirectoryContents(string sourceDir, string destinationDir, CancellationToken cancellationToken)
+        {
+            foreach (var filePath in Directory.GetFiles(sourceDir))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string destPath = Path.Combine(destinationDir, Path.GetFileName(filePath));
+                if (File.Exists(destPath))
+                {
+                    File.SetAttributes(destPath, FileAttributes.Normal);
+                    File.Delete(destPath);
+                }
+
+                File.Move(filePath, destPath);
+            }
+
+            foreach (var subDirPath in Directory.GetDirectories(sourceDir))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string destSubDirPath = Path.Combine(destinationDir, Path.GetFileName(subDirPath));
+                if (!Directory.Exists(destSubDirPath))
+                {
+                    Directory.Move(subDirPath, destSubDirPath);
+                }
+                else
+                {
+                    MoveDirectoryContents(subDirPath, destSubDirPath, cancellationToken);
+                    Directory.Delete(subDirPath, recursive: true);
+                }
             }
         }
 

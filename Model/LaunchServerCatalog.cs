@@ -17,8 +17,8 @@ namespace CommandCenter.Model
         // GMS: everything except Test 4 - Test 4 is reserved for Live Service Builds.
         public static IReadOnlyList<LaunchServerOption> GmsServers { get; } = new List<LaunchServerOption>
         {
-            new("Test 1", "GameLaunching 44.234.170.29 8484"),
-            new("Test 2", "GameLaunching 44.234.182.79 8484"),
+            new("Test 1", "GameLaunching 34.217.160.238 8484"),
+            new("Test 2", "GameLaunching 52.43.197.199 8484"),
             new("Test 3", "GameLaunching 54.148.16.230 8484"),
             new("Test 6", "GameLaunching 52.89.167.110 8484"),
             new("Staging (NA)", "GameLaunching 44.234.170.29 8484"),
