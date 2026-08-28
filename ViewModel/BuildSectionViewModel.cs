@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
 using Microsoft.Win32;
@@ -41,6 +42,7 @@ namespace CommandCenter.ViewModel
         private string? _selectedExecutable;
         private LaunchServerOption? _selectedServerOption;
         private CancellationTokenSource? _updateCancellation;
+        private DispatcherTimer? _statusClearTimer;
 
         public BuildSectionViewModel(string sectionTitle, SectionSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive)
         {
@@ -169,7 +171,39 @@ namespace CommandCenter.ViewModel
         public string StatusText
         {
             get => _statusText;
-            set => SetProperty(ref _statusText, value);
+            set
+            {
+                if (SetProperty(ref _statusText, value))
+                {
+                    RestartStatusClearTimer();
+                }
+            }
+        }
+
+        // Keeps a status message on screen for 10 seconds so it's readable, then clears itself so
+        // nothing lingers indefinitely. Restarts on every new message, which is harmless during a
+        // burst of frequent progress updates - each one just pushes the clear back out, so it only
+        // actually fires once updates stop (i.e. 10 seconds after the final message of a run).
+        private void RestartStatusClearTimer()
+        {
+            _statusClearTimer?.Stop();
+
+            if (string.IsNullOrEmpty(_statusText))
+            {
+                return;
+            }
+
+            if (_statusClearTimer == null)
+            {
+                _statusClearTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                _statusClearTimer.Tick += (_, _) =>
+                {
+                    _statusClearTimer!.Stop();
+                    StatusText = string.Empty;
+                };
+            }
+
+            _statusClearTimer.Start();
         }
 
         // Same 2 client executables for every section (GMS / CMS / Live Service).

@@ -2,6 +2,7 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
+using System.Windows.Threading;
 using CommandCenter.Model;
 using Microsoft.Win32;
 
@@ -15,6 +16,7 @@ namespace CommandCenter.ViewModel
         private readonly Func<SectionCategory, ExtraSectionSettings> _addExtraSection;
         private readonly Action<ExtraSectionSettings> _removeExtraSection;
         private string _statusText = string.Empty;
+        private DispatcherTimer? _statusClearTimer;
 
         public SettingsViewModel(AppSettings appSettings, SettingsService settingsService,
             Func<SectionCategory, ExtraSectionSettings> addExtraSection, Action<ExtraSectionSettings> removeExtraSection)
@@ -48,7 +50,37 @@ namespace CommandCenter.ViewModel
         public string StatusText
         {
             get => _statusText;
-            set => SetProperty(ref _statusText, value);
+            set
+            {
+                if (SetProperty(ref _statusText, value))
+                {
+                    RestartStatusClearTimer();
+                }
+            }
+        }
+
+        // Keeps the "Saved at ..." message on screen for 10 seconds so it's readable, then clears
+        // itself so it doesn't linger indefinitely.
+        private void RestartStatusClearTimer()
+        {
+            _statusClearTimer?.Stop();
+
+            if (string.IsNullOrEmpty(_statusText))
+            {
+                return;
+            }
+
+            if (_statusClearTimer == null)
+            {
+                _statusClearTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(10) };
+                _statusClearTimer.Tick += (_, _) =>
+                {
+                    _statusClearTimer!.Stop();
+                    StatusText = string.Empty;
+                };
+            }
+
+            _statusClearTimer.Start();
         }
 
         public RelayCommand BrowseGmsPathCommand { get; }
