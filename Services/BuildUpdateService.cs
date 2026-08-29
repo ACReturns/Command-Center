@@ -73,6 +73,18 @@ namespace CommandCenter.Services
                         progress.Report(new UpdateProgress("Removing previous build...", 52));
                         ClearDirectory(destinationBuildPath, cancellationToken);
                     }
+                    else if (!IsPartialClientArchive(sourceArchivePath))
+                    {
+                        // Patch never touches the destination build folder up front - it only ever
+                        // overwrites matching filenames via the copy below. Some patch archives wrap
+                        // the real payload in a nested Partial_Client.zip (or ship it as an already-
+                        // extracted "Partial"/"Partial Client" folder) alongside unrelated extras like
+                        // a checksums.md5 - resolve down to just that payload before copying. Skipped
+                        // when the file the user selected already IS Partial_Client.zip/.7z (see
+                        // IsPartialClientArchive) - its extracted, already-flattened content is the
+                        // payload as-is, so hunting it for another nested Partial_Client would be wrong.
+                        contentRoot = await ResolvePartialClientPayloadAsync(tempDir, contentRoot, progress, cancellationToken).ConfigureAwait(false);
+                    }
 
                     CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
 
@@ -115,8 +127,19 @@ namespace CommandCenter.Services
         // Opens the archive via SharpCompress, which auto-detects the format (zip or 7z) from the
         // file's contents, so both extensions extract through this same path. Runs on the
         // background thread Task.Run started above, so the header/central-directory read and the
-        // per-entry decompression never touch the UI thread.
-        private static async Task ExtractWithProgressAsync(string archivePath, string destinationDir, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+        // per-entry decompression never touch the UI thread. Maps progress onto the 5-50% band used
+        // for the main archive; ResolvePartialClientPayloadAsync below calls the shared
+        // ExtractArchiveAsync directly with its own narrower band for a nested Partial_Client archive.
+        private static Task ExtractWithProgressAsync(string archivePath, string destinationDir, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+        {
+            return ExtractArchiveAsync(archivePath, destinationDir, cancellationToken, (done, total) =>
+            {
+                double pct = 5 + (done / (double)total) * 45; // extraction spans 5-50%
+                progress.Report(new UpdateProgress($"Extracting ({done}/{total})...", pct));
+            });
+        }
+
+        private static async Task ExtractArchiveAsync(string archivePath, string destinationDir, CancellationToken cancellationToken, Action<int, int> onEntryExtracted)
         {
             using var archive = ArchiveFactory.Open(archivePath);
             var entries = archive.Entries.Where(e => !e.IsDirectory && !string.IsNullOrEmpty(e.Key)).ToList();
@@ -147,9 +170,102 @@ namespace CommandCenter.Services
                 }
 
                 done++;
-                double pct = 5 + (done / (double)total) * 45; // extraction spans 5-50%
-                progress.Report(new UpdateProgress($"Extracting ({done}/{total})...", pct));
+                onEntryExtracted(done, total);
             }
+        }
+
+        // Names to look for at the top of a patch archive's extracted content (after the same
+        // FindContentRoot collapsing a New Build gets). The zip/7z case is matched by base name
+        // against every SupportedExtensions entry, so a "Partial_Client.7z" is honored too, the same
+        // way the rest of this service treats both archive formats interchangeably. The folder case
+        // covers the handful of separator/casing variants a build folder might reasonably use.
+        private const string PartialClientBaseName = "Partial_Client";
+        private static readonly string[] PartialFolderNames = { "Partial", "Partial Client", "PartialClient", "Partial_Client" };
+
+        // True when the archive the user picked in the Patch tab is itself named Partial_Client
+        // (.zip or .7z) - i.e. they already browsed straight to the payload rather than to an outer
+        // patch archive that merely contains one. Same base-name-against-SupportedExtensions match
+        // ResolvePartialClientPayloadAsync uses below, just applied to the top-level selection.
+        private static bool IsPartialClientArchive(string archivePath) =>
+            string.Equals(Path.GetFileNameWithoutExtension(archivePath), PartialClientBaseName, StringComparison.OrdinalIgnoreCase) &&
+            SupportedExtensions.Contains(Path.GetExtension(archivePath), StringComparer.OrdinalIgnoreCase);
+
+        // Some patch archives wrap the real payload in a nested Partial_Client archive (or ship it as
+        // an already-extracted "Partial"/"Partial Client" folder) sitting alongside unrelated extras
+        // such as a checksums.md5 file. When either is present at the top of the extracted patch,
+        // it - and only it - is the actual patch content: everything else at that level is discarded,
+        // the archive (if that's what was found) is extracted, and the result is flattened the same
+        // way FindContentRoot flattens a New Build archive. This is only reached when the file the
+        // user selected wasn't itself named Partial_Client (see IsPartialClientArchive), so if
+        // neither is present here either, there's nothing to apply - abort rather than silently
+        // patching with whatever else the archive happened to contain.
+        private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+        {
+            string? partialArchivePath = Directory.GetFiles(contentRoot)
+                .FirstOrDefault(f =>
+                    string.Equals(Path.GetFileNameWithoutExtension(f), PartialClientBaseName, StringComparison.OrdinalIgnoreCase) &&
+                    SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase));
+
+            string? partialFolderPath = partialArchivePath == null
+                ? Directory.GetDirectories(contentRoot)
+                    .FirstOrDefault(d => PartialFolderNames.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase))
+                : null;
+
+            if (partialArchivePath == null && partialFolderPath == null)
+            {
+                // Caught by BuildSectionViewModel.RunUpdateAsync's catch (Exception), which sets
+                // StatusText to "Update failed: <message>" and shows it in the error MessageBox too -
+                // same as every other abort condition in this service (missing archive, no build
+                // path, etc.), so this doesn't need its own special-cased handling on the ViewModel side.
+                throw new InvalidOperationException(
+                    $"Couldn't find a {PartialClientBaseName}.zip/.7z file or a Partial/\"Partial Client\" folder in the extracted patch archive. Patch aborted.");
+            }
+
+            // Discard everything else extracted alongside the payload (checksums.md5, etc.) - only
+            // the Partial_Client archive or folder itself survives.
+            foreach (var file in Directory.GetFiles(contentRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (file == partialArchivePath)
+                {
+                    continue;
+                }
+
+                File.SetAttributes(file, FileAttributes.Normal);
+                File.Delete(file);
+            }
+
+            foreach (var dir in Directory.GetDirectories(contentRoot))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (dir == partialFolderPath)
+                {
+                    continue;
+                }
+
+                Directory.Delete(dir, recursive: true);
+            }
+
+            if (partialFolderPath != null)
+            {
+                return FindContentRoot(partialFolderPath);
+            }
+
+            progress.Report(new UpdateProgress("Extracting Partial_Client archive...", 51));
+
+            // Extracted inside tempDir (rather than a sibling temp folder) so it's cleaned up by the
+            // same best-effort Directory.Delete(tempDir, ...) in the outer finally block regardless
+            // of how the rest of the update turns out.
+            string partialExtractDir = Path.Combine(tempDir, "_PartialClientExtract_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(partialExtractDir);
+
+            await ExtractArchiveAsync(partialArchivePath!, partialExtractDir, cancellationToken, (done, total) =>
+            {
+                double pct = 50 + (done / (double)total) * 4; // nested extraction spans 50-54%
+                progress.Report(new UpdateProgress($"Extracting Partial_Client archive ({done}/{total})...", pct));
+            }).ConfigureAwait(false);
+
+            return FindContentRoot(partialExtractDir);
         }
 
         // Synchronous on purpose: this already runs on the background thread Task.Run started

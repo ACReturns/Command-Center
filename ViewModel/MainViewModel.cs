@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
 
@@ -16,8 +17,23 @@ namespace CommandCenter.ViewModel
         // so a delete from Settings can find and remove exactly the right one from its tab.
         private readonly Dictionary<Guid, BuildSectionViewModel> _extraViewModelsById = new();
 
+        // How often the storage tracker re-checks its current drive on its own, so free space
+        // changing from outside the app (someone clearing files on that drive in Explorer, another
+        // tool writing to it) eventually shows up without anyone touching Command Center. A single
+        // DriveInfo.AvailableFreeSpace read is one cheap OS call, not a directory scan, so this
+        // interval is chosen for a steady, unobtrusive tracker rather than to spare the system -
+        // it could safely run much more often if tighter feedback is ever wanted.
+        private static readonly TimeSpan StorageRecheckInterval = TimeSpan.FromHours(1);
+
+        private readonly DispatcherTimer _storageRecheckTimer;
+
         private int _selectedTabIndex;
         private DiskSpaceStatus? _storageStatus;
+
+        // Build path behind the tracker's current reading (startup pick, or whichever section's
+        // build/patch/push completed most recently) - the periodic recheck re-checks this same
+        // path so it never jumps the tracker to a different drive on its own.
+        private string _lastCheckedBuildPath = string.Empty;
 
         public MainViewModel()
         {
@@ -52,8 +68,13 @@ namespace CommandCenter.ViewModel
 
             if (startupSection != null)
             {
-                StorageStatus = DiskSpaceService.CheckDiskSpace(startupSection.CurrentBuildPath);
+                _lastCheckedBuildPath = startupSection.CurrentBuildPath;
+                StorageStatus = DiskSpaceService.CheckDiskSpace(_lastCheckedBuildPath);
             }
+
+            _storageRecheckTimer = new DispatcherTimer { Interval = StorageRecheckInterval };
+            _storageRecheckTimer.Tick += (_, _) => RecheckStorage();
+            _storageRecheckTimer.Start();
         }
 
         public BuildSectionViewModel Gms { get; }
@@ -96,7 +117,28 @@ namespace CommandCenter.ViewModel
 
         public bool IsStorageLow => StorageStatus?.IsLow ?? false;
 
-        private void OnDiskSpaceStatusChanged(object? sender, DiskSpaceStatus? status) => StorageStatus = status;
+        private void OnDiskSpaceStatusChanged(object? sender, DiskSpaceStatus? status)
+        {
+            if (sender is BuildSectionViewModel section)
+            {
+                _lastCheckedBuildPath = section.CurrentBuildPath;
+            }
+
+            StorageStatus = status;
+        }
+
+        // Timer tick: re-reads free space on whatever drive the tracker is currently showing, so
+        // external changes (space freed up or eaten elsewhere) surface without a build having to
+        // run. No-ops until something has actually been checked at least once.
+        private void RecheckStorage()
+        {
+            if (string.IsNullOrWhiteSpace(_lastCheckedBuildPath))
+            {
+                return;
+            }
+
+            StorageStatus = DiskSpaceService.CheckDiskSpace(_lastCheckedBuildPath);
+        }
 
         // Adds a new extra build section under the given category: persists it immediately, then
         // wires a full New Build/Patch/Launch row into that category's tab. Called from Settings
