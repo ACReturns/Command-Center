@@ -34,10 +34,22 @@ namespace CommandCenter.ViewModel
         private readonly TabSettings _settings;
         private readonly Dispatcher _uiDispatcher;
 
+        // Every top-level tab, live - only used (subscribed to) when SupportsPushedToLive is true,
+        // to build PushTargets below. Null for GMS/CMS/extra sections, which never show that panel.
+        private readonly ObservableCollection<TabInfo>? _allTabs;
+
+        // Every candidate tab (every BuildSection tab besides this one) currently being watched for
+        // BuildPath changes, regardless of whether it's eligible for PushTargets right now - see
+        // RebuildPushTargets/CandidateTab_PropertyChanged. Tracked separately from PushTargets
+        // itself since a tab with no build path still needs watching so it can appear the moment
+        // one is set.
+        private readonly List<TabSettings> _trackedPushCandidates = new();
+
         private SectionMode _selectedMode = SectionMode.Launch;
         private string _sourceArchivePath = string.Empty;
         private string _pendingVersion = string.Empty;
         private string _pushSourceFolderPath = string.Empty;
+        private PushTargetOption? _selectedPushTarget;
         private bool _isBusy;
         private double _progressPercent;
         private string _statusText = string.Empty;
@@ -52,13 +64,14 @@ namespace CommandCenter.ViewModel
         private string? _documentsFolderPath;
         private FileSystemWatcher? _documentsWatcher;
 
-        public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive)
+        public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive, ObservableCollection<TabInfo>? allTabs = null)
         {
             _settings = settings;
             _appSettings = appSettings;
             _settingsService = settingsService;
             ServerOptions = serverOptions;
             SupportsPushedToLive = supportsPushedToLive;
+            _allTabs = allTabs;
             _uiDispatcher = Dispatcher.CurrentDispatcher;
 
             _settings.PropertyChanged += Settings_PropertyChanged;
@@ -71,7 +84,7 @@ namespace CommandCenter.ViewModel
             BrowsePushSourceCommand = new RelayCommand(_ => BrowsePushSource());
             // Cancel is shared with RunUpdateCommand's token above - only one of these operations
             // can ever be in flight at a time per section, both gated by IsBusy.
-            PushToLiveCommand = new AsyncRelayCommand(_ => PushToLiveAsync(), _ => !IsBusy && SupportsPushedToLive && !string.IsNullOrWhiteSpace(PushSourceFolderPath) && HasBuildPath);
+            PushToLiveCommand = new AsyncRelayCommand(_ => PushToLiveAsync(), _ => CanPushToLive());
 
             AddDocumentFilesCommand = new RelayCommand(_ => AddDocumentFiles(), _ => HasBuildPath);
             OpenDocumentCommand = new RelayCommand(param =>
@@ -85,6 +98,16 @@ namespace CommandCenter.ViewModel
 
             _selectedExecutable = ExecutableOptions.FirstOrDefault();
             _selectedServerOption = ServerOptions.FirstOrDefault();
+
+            // PushTargets (every other build-section tab, offered as a "push this tab's build
+            // straight into Live" radio option) only matters for the Live Service section - see
+            // RebuildPushTargets. Kept live via _allTabs.CollectionChanged so a tab added/removed
+            // later from Settings shows up (or disappears) here without restarting the app.
+            if (SupportsPushedToLive && _allTabs != null)
+            {
+                _allTabs.CollectionChanged += (_, _) => RebuildPushTargets();
+                RebuildPushTargets();
+            }
 
             // Rehydrate the Documents folder (and start watching it) if this section already had
             // a build path configured from a previous session.
@@ -167,10 +190,57 @@ namespace CommandCenter.ViewModel
         }
 
         // Folder picked for "Pushed to Live" - its entire contents get moved into CurrentBuildPath.
+        // Only meaningful while IsCustomFolderSelected is true (the "Folder to Push to Live" radio).
         public string PushSourceFolderPath
         {
             get => _pushSourceFolderPath;
             set => SetProperty(ref _pushSourceFolderPath, value);
+        }
+
+        // Every other build-section tab (GMS, CMS, any extra - never Server Status/Settings/this
+        // section itself), offered as a "push straight from there" radio option alongside "Folder
+        // to Push to Live". Rebuilt from _allTabs by RebuildPushTargets; empty (and unused) on
+        // every section except the Live Service one.
+        public ObservableCollection<PushTargetOption> PushTargets { get; } = new();
+
+        // Which PushTargets entry is currently picked, or null for "Folder to Push to Live" (see
+        // IsCustomFolderSelected). Setting this reconciles every PushTargetOption's own IsSelected
+        // so their RadioButtons reflect the change even when set from code (e.g. RebuildPushTargets
+        // resetting back to null after a tab disappears) rather than from a click.
+        public PushTargetOption? SelectedPushTarget
+        {
+            get => _selectedPushTarget;
+            set
+            {
+                if (!SetProperty(ref _selectedPushTarget, value))
+                {
+                    return;
+                }
+
+                OnPropertyChanged(nameof(IsCustomFolderSelected));
+
+                foreach (var option in PushTargets)
+                {
+                    option.SetSelectedSilently(ReferenceEquals(option, value));
+                }
+            }
+        }
+
+        // True when "Folder to Push to Live" (the original manual-browse option) is the active
+        // radio choice rather than one of PushTargets. Two-way bound to that RadioButton's
+        // IsChecked - setting it true clears SelectedPushTarget; WPF setting it false (because some
+        // other radio in the group was just checked) is a no-op here, since that other radio's own
+        // binding already updated SelectedPushTarget.
+        public bool IsCustomFolderSelected
+        {
+            get => _selectedPushTarget == null;
+            set
+            {
+                if (value)
+                {
+                    SelectedPushTarget = null;
+                }
+            }
         }
 
         public bool IsBusy
@@ -397,14 +467,40 @@ namespace CommandCenter.ViewModel
 
             if (dialog.ShowDialog() == true)
             {
+                // Picking a folder here only makes sense for "Folder to Push to Live" - switch to
+                // it even if a tab option happened to be selected, so Browse always does what it
+                // looks like it does.
+                SelectedPushTarget = null;
                 PushSourceFolderPath = dialog.FolderName;
             }
         }
 
+        private bool CanPushToLive()
+        {
+            if (IsBusy || !SupportsPushedToLive || !HasBuildPath)
+            {
+                return false;
+            }
+
+            // PushTargets is already filtered to valid-build-path tabs (see RebuildPushTargets), so
+            // this re-check just guards the narrow window between that filtering and an actual
+            // click - e.g. the folder got deleted externally moments ago and a rebuild hasn't run.
+            return IsCustomFolderSelected
+                ? !string.IsNullOrWhiteSpace(PushSourceFolderPath)
+                : SelectedPushTarget != null && HasValidBuildPath(SelectedPushTarget.Settings);
+        }
+
         private async Task PushToLiveAsync()
         {
+            // Snapshot which tab (if any) this push is coming from before anything below can
+            // change the selection - PushTargetOption wraps the live TabSettings, so its
+            // BuildPath/VersionNumber are always read fresh at the point they're actually used.
+            PushTargetOption? sourceTarget = IsCustomFolderSelected ? null : SelectedPushTarget;
+            string sourceFolderPath = sourceTarget != null ? sourceTarget.Settings.BuildPath : PushSourceFolderPath;
+            string sourceDescription = sourceTarget != null ? $"{sourceTarget.Settings.Title} ({sourceFolderPath})" : sourceFolderPath;
+
             var confirm = MessageBox.Show(
-                $"This will move everything from:\n{PushSourceFolderPath}\n\ninto the {SectionTitle} Current Build folder:\n{CurrentBuildPath}\n\n" +
+                $"This will move everything from:\n{sourceDescription}\n\ninto the {SectionTitle} Current Build folder:\n{CurrentBuildPath}\n\n" +
                 $"The {SectionTitle} folder will be cleared first, and then the entire contents of the source folder will be moved into it. This can't be undone. Continue?",
                 "Confirm Push to Live",
                 MessageBoxButton.YesNo,
@@ -431,9 +527,20 @@ namespace CommandCenter.ViewModel
 
             try
             {
-                await PushToLiveService.RunAsync(PushSourceFolderPath, CurrentBuildPath, progress, _updateCancellation.Token);
+                await PushToLiveService.RunAsync(sourceFolderPath, CurrentBuildPath, progress, _updateCancellation.Token);
 
-                if (!string.IsNullOrWhiteSpace(PendingVersion))
+                if (sourceTarget != null)
+                {
+                    // Pushing from an existing tab: Live's Version Number always follows whatever
+                    // that tab was set to (not optional/typed - "if GMS was set to 271.0.3 then
+                    // that is what the Version Number should be after confirming the selection").
+                    // Then clear the source tab's own Version Number - its build folder is now
+                    // empty, so there's nothing left there to launch under that version.
+                    _settings.VersionNumber = sourceTarget.Settings.VersionNumber;
+                    sourceTarget.Settings.VersionNumber = string.Empty;
+                    _settingsService.Save(_appSettings);
+                }
+                else if (!string.IsNullOrWhiteSpace(PendingVersion))
                 {
                     // Setting VersionNumber raises Settings_PropertyChanged -> SyncDocumentsFolder,
                     // which carries this section's existing Documents folder over to the new
@@ -446,6 +553,7 @@ namespace CommandCenter.ViewModel
 
                 StatusText = $"{SectionTitle} pushed to Live successfully.";
                 PushSourceFolderPath = string.Empty;
+                SelectedPushTarget = null;
 
                 // Refresh the storage tracker now that the move landed.
                 DiskSpaceStatusChanged?.Invoke(this, DiskSpaceService.CheckDiskSpace(CurrentBuildPath));
@@ -464,6 +572,100 @@ namespace CommandCenter.ViewModel
                 IsBusy = false;
                 _updateCancellation?.Dispose();
                 _updateCancellation = null;
+            }
+        }
+
+        // (Re)builds PushTargets from _allTabs: every BuildSection-kind tab except this section
+        // itself, and only those with a real Current Build path to pull from (see
+        // HasValidBuildPath) - a tab with nothing configured, or whose configured folder no longer
+        // exists, has nothing to transfer into Live, so it doesn't belong in the list at all.
+        // Called once at construction (Live only), whenever _allTabs changes (a tab added or
+        // deleted via Settings), and whenever any candidate tab's BuildPath changes (see
+        // CandidateTab_PropertyChanged) - covers a tab gaining or losing eligibility without either
+        // tab being added/removed. Detaches every discarded PushTargetOption from its
+        // TabSettings.PropertyChanged first so it stops reacting once it's no longer shown.
+        private void RebuildPushTargets()
+        {
+            if (_allTabs == null)
+            {
+                return;
+            }
+
+            // A rebuild now fires on every candidate property change (see
+            // CandidateTab_PropertyChanged), not just a tab being added/removed - e.g. some other
+            // tab's build finishing in the background and updating its VersionNumber while the user
+            // is sitting on this panel with a target already picked. Remember which tab (if any)
+            // was selected so an unrelated change doesn't silently bounce the user back to "Folder
+            // to Push to Live".
+            TabSettings? previouslySelected = _selectedPushTarget?.Settings;
+
+            foreach (var tab in _trackedPushCandidates)
+            {
+                tab.PropertyChanged -= CandidateTab_PropertyChanged;
+            }
+            _trackedPushCandidates.Clear();
+
+            foreach (var option in PushTargets)
+            {
+                option.Selected -= PushTargetOption_Selected;
+                option.Detach();
+            }
+            PushTargets.Clear();
+
+            PushTargetOption? restoredSelection = null;
+
+            foreach (var tabInfo in _allTabs)
+            {
+                var candidate = tabInfo.Settings;
+                if (candidate.Kind != TabKind.BuildSection || ReferenceEquals(candidate, _settings))
+                {
+                    continue;
+                }
+
+                // Watch every candidate regardless of current eligibility - a tab with no build
+                // path yet still needs to be able to show up here the moment one is set (and one
+                // that's currently eligible needs to be able to drop back out if its path is
+                // cleared or the folder disappears out from under it).
+                candidate.PropertyChanged += CandidateTab_PropertyChanged;
+                _trackedPushCandidates.Add(candidate);
+
+                if (!HasValidBuildPath(candidate))
+                {
+                    continue;
+                }
+
+                var option = new PushTargetOption(candidate);
+                option.Selected += PushTargetOption_Selected;
+                PushTargets.Add(option);
+
+                if (ReferenceEquals(candidate, previouslySelected))
+                {
+                    restoredSelection = option;
+                }
+            }
+
+            // Only actually falls back to "Folder to Push to Live" when the previously-selected
+            // tab is gone entirely or no longer has a build path to pull from - otherwise the same
+            // tab's freshly-rebuilt PushTargetOption is reselected here.
+            SelectedPushTarget = restoredSelection;
+        }
+
+        // Same check as this section's own HasBuildPath - a configured, still-existing folder.
+        private static bool HasValidBuildPath(TabSettings settings) =>
+            !string.IsNullOrWhiteSpace(settings.BuildPath) && Directory.Exists(settings.BuildPath);
+
+        // Any change on a candidate tab (title, build path, version, etc.) just rebuilds the whole
+        // list - same "don't bother filtering by which property changed" approach this class
+        // already takes for its own Settings_PropertyChanged. Rebuilds are cheap (a handful of
+        // tabs, only triggered by infrequent Settings saves), so there's no need to special-case
+        // just BuildPath.
+        private void CandidateTab_PropertyChanged(object? sender, PropertyChangedEventArgs e) => RebuildPushTargets();
+
+        private void PushTargetOption_Selected(object? sender, EventArgs e)
+        {
+            if (sender is PushTargetOption option)
+            {
+                SelectedPushTarget = option;
             }
         }
 

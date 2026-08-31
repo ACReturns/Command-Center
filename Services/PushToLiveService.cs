@@ -6,10 +6,12 @@ using System.Threading.Tasks;
 
 namespace CommandCenter.Services
 {
-    // Moves the entire contents of a user-picked source folder into a Live Service build's
-    // Current Build directory, clearing the destination first. Backs the "Pushed to Live" mode,
-    // which is only offered on Live Service sections (permanent and extra - see
-    // BuildSectionViewModel.SupportsPushedToLive).
+    // Moves the entire contents of a source folder into a Live Service build's Current Build
+    // directory, clearing the destination first. The source is either a manually browsed folder
+    // ("Folder to Push to Live") or another build-section tab's own Current Build folder, picked
+    // via one of the PushTargets radio options - either way this service just sees a plain source
+    // path and doesn't care which. Backs the "Pushed to Live" mode, which is only offered on Live
+    // Service sections (permanent and extra - see BuildSectionViewModel.SupportsPushedToLive).
     //
     // Runs on a background thread throughout, same pattern as BuildUpdateService, so the window
     // and every other tab stay fully usable while a push is in flight. Reuses UpdateProgress so
