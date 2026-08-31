@@ -53,7 +53,7 @@ namespace CommandCenter.ViewModel
 
             // "Go back to a build tab" - used by Server Status' Close action. Falls back to any
             // visible tab in the (extremely unlikely) case no BuildSection tab is currently visible.
-            ServerStatus = new ServerStatusViewModel(() =>
+            ServerStatus = new ServerStatusViewModel(_appSettings, _settingsService, () =>
                 SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible && t.Settings.Kind == TabKind.BuildSection)
                     ?? Tabs.FirstOrDefault(t => t.IsVisible));
 
@@ -115,6 +115,14 @@ namespace CommandCenter.ViewModel
                 }
 
                 TabInfo? target = value;
+
+                // Leaving the Server Status tab - silently persist whichever groups the user left
+                // expanded/collapsed, no prompt needed (unlike Settings below, nothing here can be
+                // lost or conflict with anything else, so there's nothing to ask about).
+                if (_selectedTab != null && ReferenceEquals(_selectedTab.Content, ServerStatus))
+                {
+                    ServerStatus.SaveExpandedState();
+                }
 
                 // Leaving the Settings tab with unsaved changes - warn before allowing the
                 // switch. Only 2 ways out: Save Settings (then proceed to the tab that was

@@ -18,26 +18,29 @@
         </DataTemplate>
 
         <DataTemplate x:Key="GroupTemplate">
-            <Expander Header="{Binding Title}" IsExpanded="True" Margin="0,0,0,8">
-                <StackPanel Margin="12,8,0,8">
-                    <DockPanel Margin="0,0,0,8">
-                        <Button DockPanel.Dock="Right" Content="Refresh" Width="80" Command="{Binding RefreshCommand}"/>
-                        <TextBlock Text="Checking..." VerticalAlignment="Center" Foreground="#FF666666" Visibility="{Binding IsRefreshing, Converter={StaticResource BoolToVis}}"/>
-                    </DockPanel>
-                    <ItemsControl ItemsSource="{Binding Worlds}" ItemTemplate="{StaticResource WorldTemplate}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                    </ItemsControl>
-                </StackPanel>
-            </Expander>
+            <Border Background="#FFEFF2F7" BorderBrush="#FFD7DCE3" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
+                <Expander Header="{Binding Title}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                    <StackPanel Margin="12,8,0,0">
+                        <DockPanel Margin="0,0,0,8">
+                            <Button DockPanel.Dock="Right" Content="Refresh" Width="80" Command="{Binding RefreshCommand}"/>
+                            <TextBlock Text="Checking..." VerticalAlignment="Center" Foreground="#FF666666" Visibility="{Binding IsRefreshing, Converter={StaticResource BoolToVis}}"/>
+                        </DockPanel>
+                        <ItemsControl ItemsSource="{Binding Worlds}" ItemTemplate="{StaticResource WorldTemplate}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </StackPanel>
+                </Expander>
+            </Border>
         </DataTemplate>
     </UserControl.Resources>
 
     <Grid Margin="16">
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
@@ -48,7 +51,17 @@
             <Button Content="Close" Margin="8,0,0,0" Padding="8,4" Command="{Binding CloseCommand}"/>
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <!-- Legend: lets a new user tell at a glance which icon means a server is up vs. down. -->
+        <Border Grid.Row="1" Background="#FFEFF2F7" BorderBrush="#FFD7DCE3" BorderThickness="1" CornerRadius="6" Padding="10,8" Margin="0,0,0,12" HorizontalAlignment="Left">
+            <StackPanel Orientation="Horizontal">
+                <Image Width="20" Height="20" gif:ImageBehavior.AnimatedSource="{Binding ServerUpGifPath}"/>
+                <TextBlock Text="Server Up" VerticalAlignment="Center" Margin="6,0,20,0"/>
+                <Image Width="20" Height="20" gif:ImageBehavior.AnimatedSource="{Binding ServerDownGifPath}"/>
+                <TextBlock Text="Server Down" VerticalAlignment="Center" Margin="6,0,0,0"/>
+            </StackPanel>
+        </Border>
+
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
             <ItemsControl ItemsSource="{Binding Groups}" ItemTemplate="{StaticResource GroupTemplate}"/>
         </ScrollViewer>
     </Grid>

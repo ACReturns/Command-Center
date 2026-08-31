@@ -16,11 +16,13 @@ namespace CommandCenter.ViewModel
     {
         private readonly string _worldsFilePath;
         private bool _isRefreshing;
+        private bool _isExpanded;
 
-        public ServerGroupViewModel(string title, string worldsFilePath)
+        public ServerGroupViewModel(string title, string worldsFilePath, bool initiallyExpanded)
         {
             Title = title;
             _worldsFilePath = worldsFilePath;
+            _isExpanded = initiallyExpanded;
 
             RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
             LoadWorlds();
@@ -34,6 +36,15 @@ namespace CommandCenter.ViewModel
         {
             get => _isRefreshing;
             set => SetProperty(ref _isRefreshing, value);
+        }
+
+        // Bound two-way to the Expander in ServerStatusView. Live/Staging start collapsed,
+        // Test starts expanded (see ServerStatusSettings) - whatever the user leaves it as gets
+        // persisted by ServerStatusViewModel.SaveExpandedState when they leave the tab.
+        public bool IsExpanded
+        {
+            get => _isExpanded;
+            set => SetProperty(ref _isExpanded, value);
         }
 
         private void LoadWorlds()

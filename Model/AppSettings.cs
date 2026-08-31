@@ -54,11 +54,24 @@ namespace CommandCenter.Model
         public string Label { get; set; } = string.Empty;
     }
 
+    // Which of the Server Status tab's groups are expanded - persisted so the user's
+    // collapse/expand choice survives an app restart. Live and Staging default collapsed
+    // (there are a lot of worlds in both); Test defaults expanded since it's small.
+    public class ServerStatusSettings
+    {
+        public bool LiveExpanded { get; set; } = false;
+        public bool StagingExpanded { get; set; } = false;
+        public bool TestExpanded { get; set; } = true;
+    }
+
     public class AppSettings
     {
         // Every top-level tab (GMS/CMS/Live/Server Status/Settings and any extra), in display
         // order - the current, live model. See TabSettings and SettingsService's migration.
         public List<TabSettings> Tabs { get; set; } = new();
+
+        // Server Status tab's per-group expanded/collapsed state - see ServerStatusSettings.
+        public ServerStatusSettings ServerStatus { get; set; } = new();
 
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
