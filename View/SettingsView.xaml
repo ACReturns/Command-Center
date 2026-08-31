@@ -3,7 +3,6 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-             xmlns:Model="clr-namespace:CommandCenter.Model"
              mc:Ignorable="d" d:DesignWidth="740">
     <UserControl.Resources>
         <Style x:Key="SectionCard" TargetType="Border">
@@ -18,69 +17,56 @@
 
     <ScrollViewer VerticalScrollBarVisibility="Auto">
         <StackPanel Margin="16">
-            <TextBlock Text="Build Paths &amp; Versions" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
-            <TextBlock Text="The build path is only editable here. It appears read-only in each section's tab." Foreground="#FF666666" Margin="0,0,0,12"/>
+            <TextBlock Text="Tabs" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+            <TextBlock TextWrapping="Wrap" Foreground="#FF666666" Margin="0,0,0,12">
+                <Run Text="Reorder (&#x25B2;&#x25BC;), rename, hide, or delete tabs below, then click Save Settings."/>
+                <Run Text=" Nothing here takes effect until you save - and switching away from this tab with unsaved changes will ask first."/>
+            </TextBlock>
 
-            <Border Style="{StaticResource SectionCard}">
-                <StackPanel>
-                    <TextBlock Text="GMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <DockPanel Margin="0,0,0,6">
-                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseGmsPathCommand}"/>
-                        <TextBox Text="{Binding Gms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                    </DockPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Text="{Binding Gms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SectionCard}">
-                <StackPanel>
-                    <TextBlock Text="CMS" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <DockPanel Margin="0,0,0,6">
-                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCmsPathCommand}"/>
-                        <TextBox Text="{Binding Cms.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                    </DockPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Text="{Binding Cms.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <Border Style="{StaticResource SectionCard}">
-                <StackPanel>
-                    <TextBlock Text="Live Service" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                    <DockPanel Margin="0,0,0,6">
-                        <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseLivePathCommand}"/>
-                        <TextBox Text="{Binding Live.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                    </DockPanel>
-                    <StackPanel Orientation="Horizontal">
-                        <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                        <TextBox Text="{Binding Live.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-
-            <!-- Extra (user-added) build paths - each of these can be deleted; GMS/CMS/Live above cannot. -->
-            <ItemsControl ItemsSource="{Binding ExtraSections}">
+            <ItemsControl x:Name="TabsList" ItemsSource="{Binding DraftTabs}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border Style="{StaticResource SectionCard}">
                             <StackPanel>
-                                <DockPanel Margin="0,0,0,6">
-                                    <Button Content="Delete" DockPanel.Dock="Right" Width="70" Padding="4,2"
-                                            Background="#FFFDECEA" Command="{Binding DeleteCommand}"/>
-                                    <TextBlock Text="{Binding Settings.Label}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <!-- Marked-for-deletion: compact row + Restore, editable fields hidden -->
+                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
+                                    <Button Content="Restore" DockPanel.Dock="Right" Width="80" Padding="4,2" Command="{Binding RestoreCommand}"/>
+                                    <TextBlock VerticalAlignment="Center">
+                                        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
+                                        <Run Text=" will be deleted on save" Foreground="#FFB00000"/>
+                                    </TextBlock>
                                 </DockPanel>
-                                <DockPanel Margin="0,0,0,6">
-                                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
-                                    <TextBox Text="{Binding Settings.BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                                </DockPanel>
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                    <TextBox Text="{Binding Settings.VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+
+                                <!-- Normal editable row -->
+                                <StackPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
+                                    <DockPanel Margin="0,0,0,8">
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                            <Button Content="&#x25B2;" Width="26" Padding="0" Margin="0,0,4,0" ToolTip="Move up"
+                                                    Command="{Binding DataContext.MoveTabUpCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                            <Button Content="&#x25BC;" Width="26" Padding="0" Margin="0,0,10,0" ToolTip="Move down"
+                                                    Command="{Binding DataContext.MoveTabDownCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                                    CommandParameter="{Binding}"/>
+                                            <Button Content="Delete" Width="70" Padding="4,2" Background="#FFFDECEA"
+                                                    Visibility="{Binding IsPermanent, Converter={StaticResource InverseBoolToVis}}"
+                                                    Command="{Binding DeleteCommand}"/>
+                                        </StackPanel>
+                                        <CheckBox Content="Visible" DockPanel.Dock="Right" Margin="0,0,16,0" VerticalAlignment="Center"
+                                                  IsChecked="{Binding IsVisible}" IsEnabled="{Binding CanHide}"
+                                                  ToolTip="Settings can't be hidden - it's the only way back into this screen."/>
+                                        <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                                    </DockPanel>
+
+                                    <StackPanel Visibility="{Binding IsBuildSection, Converter={StaticResource BoolToVis}}">
+                                        <DockPanel Margin="0,0,0,6">
+                                            <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
+                                            <TextBox Text="{Binding BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                                        </DockPanel>
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+                                        </StackPanel>
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
                         </Border>
@@ -88,28 +74,18 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- A ContextMenu is a separate popup root, not part of the button's visual tree, so it
-                 does NOT inherit DataContext the normal way - each MenuItem's Command binds through
-                 PlacementTarget (set to the button in code-behind) to reach SettingsViewModel. -->
-            <Button Content="+ Add Build Path" Width="160" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12" Click="AddBuildPathButton_Click">
-                <Button.ContextMenu>
-                    <ContextMenu Placement="Bottom">
-                        <MenuItem Header="GMS"
-                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  CommandParameter="{x:Static Model:SectionCategory.Gms}"/>
-                        <MenuItem Header="CMS"
-                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  CommandParameter="{x:Static Model:SectionCategory.Cms}"/>
-                        <MenuItem Header="Live Service Builds"
-                                  Command="{Binding PlacementTarget.DataContext.AddExtraSectionCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
-                                  CommandParameter="{x:Static Model:SectionCategory.Live}"/>
-                    </ContextMenu>
-                </Button.ContextMenu>
-            </Button>
+            <!-- No more GMS/CMS/Live picker - extras are independent top-level tabs now, not
+                 nested under a parent category, so there's nothing to choose here. One click adds
+                 a plain build-section row below with Title/BuildPath/VersionNumber ready to fill
+                 in (see SettingsViewModel.AddTab). -->
+            <Button Content="+ Add Tab" Width="120" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12"
+                    Command="{Binding AddTabCommand}"/>
 
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                 <Button Content="Save Settings" Width="140" Padding="8,4" Command="{Binding SaveCommand}"/>
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF2E7D32"/>
+                <TextBlock Text="Unsaved changes" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FFB00000" FontWeight="SemiBold"
+                           Visibility="{Binding IsDirty, Converter={StaticResource BoolToVis}}"/>
             </StackPanel>
         </StackPanel>
     </ScrollViewer>

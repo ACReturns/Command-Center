@@ -5,9 +5,10 @@ using System.Runtime.CompilerServices;
 
 namespace CommandCenter.Model
 {
-    // Per-section build configuration (GMS / CMS / Live). Implements INotifyPropertyChanged
-    // so the Settings tab and each build tab can share the same instance and stay in sync
-    // without any manual refresh plumbing.
+    // LEGACY (pre-tabs) per-section shape. Nothing in the app writes or reads these directly
+    // anymore - they're kept only so a settings.json saved by an older version still
+    // deserializes without throwing, and SettingsService.Load migrates them into AppSettings.Tabs
+    // (below) the first time such a file is loaded. Do not build new features on this class.
     public class SectionSettings : INotifyPropertyChanged
     {
         private string _buildPath = string.Empty;
@@ -45,9 +46,7 @@ namespace CommandCenter.Model
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    // A user-added build path beyond the 3 permanent GMS/CMS/Live sections. Belongs to one of
-    // the 3 categories (inherits that category's server catalog + client executables) and can
-    // be deleted from Settings - unlike Gms/Cms/Live below, which always exist.
+    // LEGACY - see SectionSettings above. Superseded by TabSettings (IsPermanent = false).
     public class ExtraSectionSettings : SectionSettings
     {
         public Guid Id { get; set; } = Guid.NewGuid();
@@ -57,11 +56,16 @@ namespace CommandCenter.Model
 
     public class AppSettings
     {
+        // Every top-level tab (GMS/CMS/Live/Server Status/Settings and any extra), in display
+        // order - the current, live model. See TabSettings and SettingsService's migration.
+        public List<TabSettings> Tabs { get; set; } = new();
+
+        // LEGACY - see SectionSettings above. Present only for backward-compatible
+        // deserialization of a settings.json saved before tabs existed; SettingsService.Load
+        // resets these to empty immediately after migrating them into Tabs once.
         public SectionSettings Gms { get; set; } = new();
         public SectionSettings Cms { get; set; } = new();
         public SectionSettings Live { get; set; } = new();
-
-        // User-added build paths beyond the permanent 3, created/removed from the Settings tab.
         public List<ExtraSectionSettings> ExtraSections { get; set; } = new();
     }
 }

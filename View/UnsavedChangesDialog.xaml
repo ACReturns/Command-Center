@@ -1,0 +1,29 @@
+<Window x:Class="CommandCenter.View.UnsavedChangesDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="Unsaved Changes" Height="170" Width="420"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStyle="ToolWindow">
+    <!-- Only 2 ways out: Save Settings (saves the draft, then the caller proceeds to the tab the
+         user clicked), or Cancel (stays on Settings, changes left exactly as they were - there is
+         no "discard and leave" option anymore). See MainViewModel.SelectedTab for the caller. -->
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" VerticalAlignment="Center" FontSize="13"
+                   Text="You have unsaved changes in Settings. Save them to switch tabs, or cancel to stay here and keep editing."/>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="SaveButton" Content="Save Settings" Width="120" Padding="6,5" Margin="0,0,8,0"
+                    IsDefault="True" Click="Save_Click"/>
+            <Button x:Name="CancelButton" Content="Cancel" Width="90" Padding="6,5"
+                    IsCancel="True" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

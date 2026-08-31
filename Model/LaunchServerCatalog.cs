@@ -42,13 +42,17 @@ namespace CommandCenter.Model
             new("Staging (World Merge)", "GameLaunching 44.234.182.79 8484"),
         };
 
-        // An extra (user-added) section behaves exactly like its parent category: same server
-        // catalog, same client executables. This is how that's looked up by category.
+        // An extra section under Gms/Cms/Live behaves exactly like its parent category: same
+        // server catalog, same client executables. A General tab (created via "+ Add Tab" now
+        // that extras are their own top-level tabs, not nested under a parent) has no preset
+        // server list - launch still works via a manually-entered target, there's just nothing
+        // to pick from the dropdown.
         public static IReadOnlyList<LaunchServerOption> ServersFor(SectionCategory category) => category switch
         {
             SectionCategory.Gms => GmsServers,
             SectionCategory.Cms => CmsServers,
             SectionCategory.Live => LiveServers,
+            SectionCategory.General => Array.Empty<LaunchServerOption>(),
             _ => Array.Empty<LaunchServerOption>()
         };
 
@@ -57,6 +61,7 @@ namespace CommandCenter.Model
             SectionCategory.Gms => "GMS",
             SectionCategory.Cms => "CMS",
             SectionCategory.Live => "Live Service",
+            SectionCategory.General => "Extra",
             _ => category.ToString()
         };
     }

@@ -1,10 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Linq;
+using System.Windows;
+using System.Windows.Data;
 using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
+using CommandCenter.View;
 
 namespace CommandCenter.ViewModel
 {
@@ -12,10 +16,6 @@ namespace CommandCenter.ViewModel
     {
         private readonly AppSettings _appSettings;
         private readonly SettingsService _settingsService;
-
-        // Tab-side BuildSectionViewModel for each extra section, keyed by its ExtraSectionSettings.Id
-        // so a delete from Settings can find and remove exactly the right one from its tab.
-        private readonly Dictionary<Guid, BuildSectionViewModel> _extraViewModelsById = new();
 
         // How often the storage tracker re-checks its current drive on its own, so free space
         // changing from outside the app (someone clearing files on that drive in Explorer, another
@@ -27,8 +27,17 @@ namespace CommandCenter.ViewModel
 
         private readonly DispatcherTimer _storageRecheckTimer;
 
-        private int _selectedTabIndex;
+        private TabInfo? _selectedTab;
         private DiskSpaceStatus? _storageStatus;
+
+        // Guards SelectedTab's setter against reentrancy. Saving from the unsaved-changes prompt
+        // (Settings.Save() -> OnSettingsTabsCommitted() -> TabsView.Refresh()) can make WPF push
+        // another SelectedItem change back into this same setter before the outer call has
+        // finished - that inner call used to see Settings.IsDirty still true (it hadn't been
+        // cleared yet) and pop a second prompt on top of the first, which is the reported
+        // "saves but won't leave the tab / infinite loop" bug. While this flag is set, the outer
+        // call already owns resolving the final selection, so any reentrant call is a no-op.
+        private bool _isResolvingTabSwitch;
 
         // Build path behind the tracker's current reading (startup pick, or whichever section's
         // build/patch/push completed most recently) - the periodic recheck re-checks this same
@@ -40,31 +49,36 @@ namespace CommandCenter.ViewModel
             _settingsService = new SettingsService();
             _appSettings = _settingsService.Load();
 
-            Gms = new BuildSectionViewModel("GMS", _appSettings.Gms, _appSettings, _settingsService, LaunchServerCatalog.GmsServers, supportsPushedToLive: false);
-            Cms = new BuildSectionViewModel("CMS", _appSettings.Cms, _appSettings, _settingsService, LaunchServerCatalog.CmsServers, supportsPushedToLive: false);
-            Live = new BuildSectionViewModel("Live Service", _appSettings.Live, _appSettings, _settingsService, LaunchServerCatalog.LiveServers, supportsPushedToLive: true);
-            Settings = new SettingsViewModel(_appSettings, _settingsService, AddExtraSection, RemoveExtraSection);
-            ServerStatus = new ServerStatusViewModel(() => SelectedTabIndex = 0);
+            Settings = new SettingsViewModel(_appSettings, _settingsService, OnSettingsTabsCommitted);
 
-            // Any section's completed build/patch refreshes the storage tracker; whichever one
-            // finishes most recently is what the single tracker at the bottom of the window shows.
-            Gms.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
-            Cms.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
-            Live.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+            // "Go back to a build tab" - used by Server Status' Close action. Falls back to any
+            // visible tab in the (extremely unlikely) case no BuildSection tab is currently visible.
+            ServerStatus = new ServerStatusViewModel(() =>
+                SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible && t.Settings.Kind == TabKind.BuildSection)
+                    ?? Tabs.FirstOrDefault(t => t.IsVisible));
 
-            // Rehydrate any extra sections saved from a previous session into their tab.
-            foreach (var extra in _appSettings.ExtraSections.ToList())
+            foreach (var tabSettings in _appSettings.Tabs.OrderBy(t => t.Order))
             {
-                CreateExtraSectionViewModel(extra);
+                Tabs.Add(CreateTabInfo(tabSettings));
             }
 
+            // What MainWindow's TabControl actually binds to: every tab, sorted by Order and
+            // filtered down to the currently-visible ones. Refreshed explicitly after Settings
+            // commits a change (OnSettingsTabsCommitted) - order/visibility only ever change as
+            // part of a Save, never continuously, so a one-shot Refresh() there is enough; no
+            // live-shaping needed.
+            TabsView = CollectionViewSource.GetDefaultView(Tabs);
+            TabsView.SortDescriptions.Add(new SortDescription(nameof(TabInfo.Order), ListSortDirection.Ascending));
+            TabsView.Filter = o => o is TabInfo t && t.IsVisible;
+
+            _selectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+
             // Startup check so the tracker has a real number before any build ever runs, rather
-            // than sitting blank until the first extraction. Uses whichever section already has a
-            // configured build path, checked in GMS -> CMS -> Live order.
-            BuildSectionViewModel? startupSection =
-                Gms.HasBuildPath ? Gms :
-                Cms.HasBuildPath ? Cms :
-                Live.HasBuildPath ? Live : null;
+            // than sitting blank until the first extraction. Uses whichever BuildSection tab
+            // (in the user's own tab order) already has a configured build path.
+            BuildSectionViewModel? startupSection = Tabs
+                .Select(t => t.Content as BuildSectionViewModel)
+                .FirstOrDefault(vm => vm != null && vm.HasBuildPath);
 
             if (startupSection != null)
             {
@@ -77,22 +91,68 @@ namespace CommandCenter.ViewModel
             _storageRecheckTimer.Start();
         }
 
-        public BuildSectionViewModel Gms { get; }
-        public BuildSectionViewModel Cms { get; }
-        public BuildSectionViewModel Live { get; }
         public SettingsViewModel Settings { get; }
         public ServerStatusViewModel ServerStatus { get; }
 
-        // Extra (user-added) build sections, grouped by which permanent tab they render under as
-        // additional rows. Settings can add/remove from these at any time.
-        public ObservableCollection<BuildSectionViewModel> GmsExtras { get; } = new();
-        public ObservableCollection<BuildSectionViewModel> CmsExtras { get; } = new();
-        public ObservableCollection<BuildSectionViewModel> LiveExtras { get; } = new();
+        // Every top-level tab - GMS/CMS/Live/Server Status/Settings and any extra - regardless of
+        // visibility. TabsView (sorted + filtered to IsVisible) is what the TabControl renders.
+        public ObservableCollection<TabInfo> Tabs { get; } = new();
+        public ICollectionView TabsView { get; }
 
-        public int SelectedTabIndex
+        public TabInfo? SelectedTab
         {
-            get => _selectedTabIndex;
-            set => SetProperty(ref _selectedTabIndex, value);
+            get => _selectedTab;
+            set
+            {
+                if (ReferenceEquals(_selectedTab, value))
+                {
+                    return;
+                }
+
+                if (_isResolvingTabSwitch)
+                {
+                    return;
+                }
+
+                TabInfo? target = value;
+
+                // Leaving the Settings tab with unsaved changes - warn before allowing the
+                // switch. Only 2 ways out: Save Settings (then proceed to the tab that was
+                // clicked), or Cancel (stay on Settings, changes untouched).
+                if (_selectedTab != null && ReferenceEquals(_selectedTab.Content, Settings) && Settings.IsDirty)
+                {
+                    _isResolvingTabSwitch = true;
+                    try
+                    {
+                        bool save = UnsavedChangesDialog.PromptSave(Application.Current?.MainWindow);
+
+                        if (!save)
+                        {
+                            // Cancel: nothing changes - just force the TabControl's visual
+                            // selection back to Settings, since the click already moved it.
+                            OnPropertyChanged(nameof(SelectedTab));
+                            return;
+                        }
+
+                        Settings.Save();
+
+                        // The tab the user was switching to might itself have just been deleted as
+                        // part of that save (e.g. marked for deletion, then clicked before saving) -
+                        // fall back to any visible tab rather than pointing at one that no longer exists.
+                        if (target != null && !Tabs.Contains(target))
+                        {
+                            target = Tabs.FirstOrDefault(t => t.IsVisible);
+                        }
+                    }
+                    finally
+                    {
+                        _isResolvingTabSwitch = false;
+                    }
+                }
+
+                _selectedTab = target;
+                OnPropertyChanged(nameof(SelectedTab));
+            }
         }
 
         public DiskSpaceStatus? StorageStatus
@@ -140,60 +200,90 @@ namespace CommandCenter.ViewModel
             StorageStatus = DiskSpaceService.CheckDiskSpace(_lastCheckedBuildPath);
         }
 
-        // Adds a new extra build section under the given category: persists it immediately, then
-        // wires a full New Build/Patch/Launch row into that category's tab. Called from Settings
-        // when "+ Add Build Path" -> a category is picked from the dropdown.
-        private ExtraSectionSettings AddExtraSection(SectionCategory category)
+        // Called by SettingsViewModel right after a Save has committed - _appSettings.Tabs now
+        // reflects the final set/order/visibility/content. Reconciles the live Tabs collection to
+        // match: tears down and removes any tab that's gone, creates a fresh TabInfo (and, for a
+        // BuildSection tab, a fresh BuildSectionViewModel) for anything brand new. Everything that
+        // survived already picked up its Title/BuildPath/VersionNumber/IsVisible/Order changes on
+        // its own, since Settings mutated the very same TabSettings instance that tab's TabInfo/
+        // BuildSectionViewModel already wraps - only the sort/filter needs a nudge (Refresh) since
+        // those don't re-run automatically just because a property on an existing item changed.
+        private void OnSettingsTabsCommitted()
         {
-            int existingCount = _appSettings.ExtraSections.Count(x => x.Category == category);
-            var extra = new ExtraSectionSettings
+            var liveIds = new HashSet<Guid>(_appSettings.Tabs.Select(t => t.Id));
+
+            foreach (var tabInfo in Tabs.Where(t => !liveIds.Contains(t.Settings.Id)).ToList())
             {
-                Category = category,
-                Label = $"{LaunchServerCatalog.DisplayName(category)} Extra {existingCount + 1}"
-            };
+                TeardownTab(tabInfo);
+                Tabs.Remove(tabInfo);
 
-            _appSettings.ExtraSections.Add(extra);
-            _settingsService.Save(_appSettings);
+                if (ReferenceEquals(SelectedTab, tabInfo))
+                {
+                    SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+                }
+            }
 
-            CreateExtraSectionViewModel(extra);
-            return extra;
+            var existingIds = new HashSet<Guid>(Tabs.Select(t => t.Settings.Id));
+            foreach (var settings in _appSettings.Tabs.Where(s => !existingIds.Contains(s.Id)))
+            {
+                Tabs.Add(CreateTabInfo(settings));
+            }
+
+            TabsView.Refresh();
         }
 
-        // Removes an extra build section: un-persists it and pulls its row out of whichever tab
-        // it was in. This is the only way an extra section goes away - its tab row has no delete
-        // option of its own.
-        private void RemoveExtraSection(ExtraSectionSettings extra)
+        private TabInfo CreateTabInfo(TabSettings settings)
         {
-            _appSettings.ExtraSections.Remove(extra);
-            _settingsService.Save(_appSettings);
+            object content = settings.Kind switch
+            {
+                TabKind.BuildSection => CreateBuildSectionViewModel(settings),
+                TabKind.ServerStatus => ServerStatus,
+                TabKind.Settings => Settings,
+                _ => throw new InvalidOperationException($"Unknown tab kind: {settings.Kind}")
+            };
 
-            if (_extraViewModelsById.Remove(extra.Id, out var vm))
+            if (content is BuildSectionViewModel vm)
+            {
+                vm.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+            }
+
+            return new TabInfo(settings, content, IconFor(settings));
+        }
+
+        // A General-category tab (everything "+ Add Tab" creates now) gets no preset server list
+        // and no "Pushed to Live" option - both are still tied to a real Gms/Cms/Live category,
+        // which a plain extra tab no longer has.
+        private BuildSectionViewModel CreateBuildSectionViewModel(TabSettings settings) =>
+            new BuildSectionViewModel(settings, _appSettings, _settingsService,
+                LaunchServerCatalog.ServersFor(settings.Category), supportsPushedToLive: settings.Category == SectionCategory.Live);
+
+        // A deleted tab's documents shouldn't outlive it - "we don't want to keep anything from
+        // the extra builds." Never actually reached for the 5 permanent tabs, which can't be
+        // marked for deletion in the first place (DraftTabViewModel.DeleteCommand is disabled for
+        // IsPermanent tabs).
+        private void TeardownTab(TabInfo tabInfo)
+        {
+            if (tabInfo.Content is BuildSectionViewModel vm)
             {
                 vm.DiskSpaceStatusChanged -= OnDiskSpaceStatusChanged;
-
-                // The extra section's Documents folder shouldn't outlive the section itself -
-                // "we don't want to keep anything from the extra builds."
                 vm.StopWatching();
                 vm.DeleteDocumentsFolder();
-
-                ExtrasFor(extra.Category).Remove(vm);
             }
         }
 
-        private void CreateExtraSectionViewModel(ExtraSectionSettings extra)
+        private static string IconFor(TabSettings settings) => settings.Kind switch
         {
-            var vm = new BuildSectionViewModel(extra.Label, extra, _appSettings, _settingsService, LaunchServerCatalog.ServersFor(extra.Category), supportsPushedToLive: extra.Category == SectionCategory.Live);
-            vm.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
-            _extraViewModelsById[extra.Id] = vm;
-            ExtrasFor(extra.Category).Add(vm);
-        }
-
-        private ObservableCollection<BuildSectionViewModel> ExtrasFor(SectionCategory category) => category switch
-        {
-            SectionCategory.Gms => GmsExtras,
-            SectionCategory.Cms => CmsExtras,
-            SectionCategory.Live => LiveExtras,
-            _ => GmsExtras
+            TabKind.ServerStatus => "img/Servers.ico",
+            TabKind.Settings => "img/Settings.ico",
+            TabKind.BuildSection => settings.Category switch
+            {
+                SectionCategory.Gms => "img/Maple.ico",
+                SectionCategory.Cms => "img/Classic.ico",
+                SectionCategory.Live => "img/Live.ico",
+                SectionCategory.General => "img/AppIcon.ico",
+                _ => "img/AppIcon.ico"
+            },
+            _ => "img/AppIcon.ico"
         };
     }
 }

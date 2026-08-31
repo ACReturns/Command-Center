@@ -1,51 +1,55 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.IO;
-using System.Windows;
+using System.Linq;
 using System.Windows.Threading;
 using CommandCenter.Model;
-using Microsoft.Win32;
 
 namespace CommandCenter.ViewModel
 {
-    // The only place a section's build path can be changed. Build tabs display it read-only.
+    // Owns the DRAFT copy of every tab's settings while the Settings tab is open (DraftTabs).
+    // Nothing here touches the live AppSettings.Tabs - or the live TabInfo/BuildSectionViewModel
+    // instances MainWindow actually renders - until Save() is called. That's what makes
+    // discarding unsaved changes trivial: MainViewModel's tab-switch guard just calls
+    // DiscardChanges(), which throws the draft away and rebuilds it fresh from whatever the live
+    // Tabs still are, since the live side was never touched to begin with.
     public class SettingsViewModel : ViewModelBase
     {
         private readonly AppSettings _appSettings;
         private readonly SettingsService _settingsService;
-        private readonly Func<SectionCategory, ExtraSectionSettings> _addExtraSection;
-        private readonly Action<ExtraSectionSettings> _removeExtraSection;
+        private readonly Action _onTabsCommitted;
         private string _statusText = string.Empty;
         private DispatcherTimer? _statusClearTimer;
+        private bool _isDirty;
 
-        public SettingsViewModel(AppSettings appSettings, SettingsService settingsService,
-            Func<SectionCategory, ExtraSectionSettings> addExtraSection, Action<ExtraSectionSettings> removeExtraSection)
+        // onTabsCommitted is called after Save() has already updated _appSettings.Tabs in place
+        // and persisted it - MainViewModel uses it to reconcile its live Tabs/TabInfo collection
+        // (create a BuildSectionViewModel for anything brand new, tear down anything deleted).
+        public SettingsViewModel(AppSettings appSettings, SettingsService settingsService, Action onTabsCommitted)
         {
             _appSettings = appSettings;
             _settingsService = settingsService;
-            _addExtraSection = addExtraSection;
-            _removeExtraSection = removeExtraSection;
+            _onTabsCommitted = onTabsCommitted;
 
-            BrowseGmsPathCommand = new RelayCommand(_ => BrowsePath(Gms, "GMS"));
-            BrowseCmsPathCommand = new RelayCommand(_ => BrowsePath(Cms, "CMS"));
-            BrowseLivePathCommand = new RelayCommand(_ => BrowsePath(Live, "Live Service"));
+            AddTabCommand = new RelayCommand(_ => AddTab());
+            SaveCommand = new RelayCommand(_ => Save(), _ => IsDirty);
+            MoveTabUpCommand = new RelayCommand(param => MoveTab(param as DraftTabViewModel, -1), param => CanMove(param as DraftTabViewModel, -1));
+            MoveTabDownCommand = new RelayCommand(param => MoveTab(param as DraftTabViewModel, 1), param => CanMove(param as DraftTabViewModel, 1));
 
-            AddExtraSectionCommand = new RelayCommand(param => AddExtraSection((SectionCategory)param!));
-            SaveCommand = new RelayCommand(_ => Save());
-
-            foreach (var extra in _appSettings.ExtraSections)
-            {
-                ExtraSections.Add(new ExtraSectionRowViewModel(extra, RemoveExtraSection));
-            }
+            LoadDraftFromLive();
         }
 
-        public SectionSettings Gms => _appSettings.Gms;
-        public SectionSettings Cms => _appSettings.Cms;
-        public SectionSettings Live => _appSettings.Live;
+        // Every tab's draft, in display order - Settings' own row is in here like any other.
+        public ObservableCollection<DraftTabViewModel> DraftTabs { get; } = new();
 
-        // Additional build paths beyond the 3 permanent ones above - each of these can be
-        // deleted from here (and only from here; GMS/CMS/Live above never can be).
-        public ObservableCollection<ExtraSectionRowViewModel> ExtraSections { get; } = new();
+        // True the moment any draft field changes, a tab is added/deleted/restored, or the order
+        // changes - cleared by Save() or DiscardChanges(). MainViewModel reads this to decide
+        // whether switching away from Settings needs to warn the user first.
+        public bool IsDirty
+        {
+            get => _isDirty;
+            private set => SetProperty(ref _isDirty, value);
+        }
 
         public string StatusText
         {
@@ -83,89 +87,142 @@ namespace CommandCenter.ViewModel
             _statusClearTimer.Start();
         }
 
-        public RelayCommand BrowseGmsPathCommand { get; }
-        public RelayCommand BrowseCmsPathCommand { get; }
-        public RelayCommand BrowseLivePathCommand { get; }
-        public RelayCommand AddExtraSectionCommand { get; }
+        public RelayCommand AddTabCommand { get; }
         public RelayCommand SaveCommand { get; }
+        public RelayCommand MoveTabUpCommand { get; }
+        public RelayCommand MoveTabDownCommand { get; }
 
-        private static void BrowsePath(SectionSettings section, string label)
+        // No more GMS/CMS/Live picker - extras are independent top-level tabs now, not nested
+        // under a parent category, so there's nothing meaningful to pick. Every tab created here
+        // is a plain SectionCategory.General build section; the user fills in its Title,
+        // VersionNumber, and BuildPath directly on the row that appears (same fields any other
+        // build-section tab has).
+        private void AddTab()
         {
-            var dialog = new OpenFolderDialog
-            {
-                Title = $"Select {label} build folder",
-                InitialDirectory = string.IsNullOrWhiteSpace(section.BuildPath) || !Directory.Exists(section.BuildPath)
-                    ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-                    : section.BuildPath
-            };
+            const SectionCategory category = SectionCategory.General;
+            int existingCount = DraftTabs.Count(d => d.Category == category && !d.IsMarkedForDeletion);
+            var draft = DraftTabViewModel.CreateNew(category, $"New Tab {existingCount + 1}");
+            draft.Changed += OnDraftChanged;
+            DraftTabs.Add(draft);
+            IsDirty = true;
+        }
 
-            if (dialog.ShowDialog() == true)
+        private bool CanMove(DraftTabViewModel? draft, int delta)
+        {
+            if (draft == null)
             {
-                section.BuildPath = dialog.FolderName;
+                return false;
             }
+
+            int index = DraftTabs.IndexOf(draft);
+            int target = index + delta;
+            return index >= 0 && target >= 0 && target < DraftTabs.Count;
         }
 
-        private void AddExtraSection(SectionCategory category)
+        private void MoveTab(DraftTabViewModel? draft, int delta)
         {
-            var extra = _addExtraSection(category);
-            ExtraSections.Add(new ExtraSectionRowViewModel(extra, RemoveExtraSection));
-        }
-
-        private void RemoveExtraSection(ExtraSectionRowViewModel row)
-        {
-            var confirm = MessageBox.Show(
-                $"Delete \"{row.Settings.Label}\"?\n\nThis removes it from Settings and from its tab. This can't be undone.",
-                "Delete Build Path",
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Warning);
-
-            if (confirm != MessageBoxResult.Yes)
+            if (!CanMove(draft, delta))
             {
                 return;
             }
 
-            _removeExtraSection(row.Settings);
-            ExtraSections.Remove(row);
+            int index = DraftTabs.IndexOf(draft!);
+            DraftTabs.Move(index, index + delta);
+            IsDirty = true;
         }
 
-        private void Save()
+        // Rebuilds the draft list from whatever the live AppSettings.Tabs currently are - used
+        // both at construction and whenever unsaved changes are discarded.
+        private void LoadDraftFromLive()
         {
-            _settingsService.Save(_appSettings);
-            StatusText = $"Saved at {DateTime.Now:t}.";
-        }
-    }
-
-    // One row in Settings for a user-added build path: wraps its ExtraSectionSettings with a
-    // folder-browse command and a delete command. This is the only place deletion is offered -
-    // the matching row in its tab has no delete option of its own.
-    public class ExtraSectionRowViewModel : ViewModelBase
-    {
-        public ExtraSectionRowViewModel(ExtraSectionSettings settings, Action<ExtraSectionRowViewModel> onDelete)
-        {
-            Settings = settings;
-            BrowseCommand = new RelayCommand(_ => BrowsePath());
-            DeleteCommand = new RelayCommand(_ => onDelete(this));
-        }
-
-        public ExtraSectionSettings Settings { get; }
-
-        public RelayCommand BrowseCommand { get; }
-        public RelayCommand DeleteCommand { get; }
-
-        private void BrowsePath()
-        {
-            var dialog = new OpenFolderDialog
+            foreach (var draft in DraftTabs)
             {
-                Title = $"Select {Settings.Label} build folder",
-                InitialDirectory = string.IsNullOrWhiteSpace(Settings.BuildPath) || !Directory.Exists(Settings.BuildPath)
-                    ? Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
-                    : Settings.BuildPath
-            };
-
-            if (dialog.ShowDialog() == true)
-            {
-                Settings.BuildPath = dialog.FolderName;
+                draft.Changed -= OnDraftChanged;
             }
+
+            DraftTabs.Clear();
+
+            foreach (var settings in _appSettings.Tabs.OrderBy(t => t.Order))
+            {
+                var draft = DraftTabViewModel.FromSettings(settings);
+                draft.Changed += OnDraftChanged;
+                DraftTabs.Add(draft);
+            }
+
+            IsDirty = false;
+        }
+
+        private void OnDraftChanged() => IsDirty = true;
+
+        // Called by MainViewModel's tab-switch guard when the user chooses to leave Settings
+        // without saving. Live AppSettings.Tabs was never touched, so this is just a fresh clone
+        // of it - every unsaved edit, add, delete, and reorder simply disappears.
+        public void DiscardChanges() => LoadDraftFromLive();
+
+        public void Save()
+        {
+            var liveById = _appSettings.Tabs.ToDictionary(t => t.Id);
+            var newLiveList = new List<TabSettings>();
+
+            for (int i = 0; i < DraftTabs.Count; i++)
+            {
+                var draft = DraftTabs[i];
+
+                if (draft.IsMarkedForDeletion)
+                {
+                    continue;
+                }
+
+                // Settings itself can never be hidden - it's the only way back into Settings -
+                // regardless of whatever the draft's checkbox says.
+                bool isVisible = draft.Kind == TabKind.Settings ? true : draft.IsVisible;
+
+                if (liveById.TryGetValue(draft.Id, out var live))
+                {
+                    live.Title = draft.Title;
+                    live.IsVisible = isVisible;
+                    live.Order = i;
+
+                    if (draft.IsBuildSection)
+                    {
+                        live.BuildPath = draft.BuildPath;
+                        live.VersionNumber = draft.VersionNumber;
+                    }
+
+                    newLiveList.Add(live);
+                }
+                else
+                {
+                    // Brand-new tab created this session.
+                    newLiveList.Add(new TabSettings
+                    {
+                        Id = draft.Id,
+                        Kind = draft.Kind,
+                        Category = draft.Category,
+                        IsPermanent = false,
+                        Title = draft.Title,
+                        IsVisible = isVisible,
+                        Order = i,
+                        BuildPath = draft.BuildPath,
+                        VersionNumber = draft.VersionNumber
+                    });
+                }
+            }
+
+            _appSettings.Tabs = newLiveList;
+            _settingsService.Save(_appSettings);
+
+            // Clear IsDirty (via LoadDraftFromLive) BEFORE notifying MainViewModel of the commit.
+            // OnTabsCommitted() calls TabsView.Refresh(), which can make WPF push a SelectedItem
+            // change back into MainViewModel.SelectedTab's setter re-entrantly while this very
+            // Save() call is still on the stack. That re-entrant call re-checks Settings.IsDirty -
+            // if it were still true at that point (as it used to be, back when this ran after
+            // _onTabsCommitted), it would pop a second "unsaved changes" prompt on top of this
+            // save, which is what caused the "saves but won't leave the tab" loop.
+            LoadDraftFromLive();
+            StatusText = $"Saved at {DateTime.Now:t}.";
+
+            _onTabsCommitted();
         }
     }
 }

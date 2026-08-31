@@ -104,91 +104,40 @@
                     Click="CloseButton_Click"/>
         </Grid>
 
-        <TabControl Grid.Row="1" Grid.ColumnSpan="2" SelectedIndex="{Binding SelectedTabIndex}" Margin="6,6,6,6">
-            <TabItem>
-                <TabItem.Header>
+        <!-- Tab strip is fully data-driven now: every GMS/CMS/Live/Server Status/Settings tab and
+             any extra tab is a TabInfo in MainViewModel.TabsView (sorted by Order, filtered to
+             IsVisible - see MainViewModel.SelectedTab for the unsaved-Settings-changes guard on
+             switching away). ItemTemplate draws the icon+title header; ContentTemplate hands the
+             selected tab's Content down to a ContentControl, which resolves to the right View via
+             the implicit per-ViewModel-type DataTemplates below. -->
+        <TabControl Grid.Row="1" Grid.ColumnSpan="2" Margin="6,6,6,6"
+                    ItemsSource="{Binding TabsView}" SelectedItem="{Binding SelectedTab}">
+            <TabControl.Resources>
+                <DataTemplate DataType="{x:Type ViewModel:BuildSectionViewModel}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <View:BuildSectionView/>
+                    </ScrollViewer>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type ViewModel:ServerStatusViewModel}">
+                    <View:ServerStatusView/>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type ViewModel:SettingsViewModel}">
+                    <View:SettingsView/>
+                </DataTemplate>
+            </TabControl.Resources>
+            <TabControl.ItemTemplate>
+                <DataTemplate>
                     <StackPanel Orientation="Horizontal">
-                        <Image Source="img/Maple.ico" Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="GMS" VerticalAlignment="Center"/>
+                        <Image Source="{Binding IconSource}" Width="16" Height="16" Margin="0,0,4,0"/>
+                        <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
                     </StackPanel>
-                </TabItem.Header>
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <View:BuildSectionView DataContext="{Binding Gms}"/>
-                        <ItemsControl ItemsSource="{Binding GmsExtras}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
-                                        <View:BuildSectionView DataContext="{Binding}"/>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <Image Source="img/Classic.ico" Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="CMS" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </TabItem.Header>
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <View:BuildSectionView DataContext="{Binding Cms}"/>
-                        <ItemsControl ItemsSource="{Binding CmsExtras}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
-                                        <View:BuildSectionView DataContext="{Binding}"/>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <Image Source="img/Live.ico" Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="Live Service Builds" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </TabItem.Header>
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <View:BuildSectionView DataContext="{Binding Live}"/>
-                        <ItemsControl ItemsSource="{Binding LiveExtras}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border BorderThickness="0,2,0,0" BorderBrush="#FFCCCCCC" Margin="0,4,0,0">
-                                        <View:BuildSectionView DataContext="{Binding}"/>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
-            </TabItem>
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <Image Source="img/Servers.ico" Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="Server Status" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </TabItem.Header>
-                <View:ServerStatusView DataContext="{Binding ServerStatus}"/>
-            </TabItem>
-            <TabItem>
-                <TabItem.Header>
-                    <StackPanel Orientation="Horizontal">
-                        <Image Source="img/Settings.ico" Width="16" Height="16" Margin="0,0,4,0"/>
-                        <TextBlock Text="Settings" VerticalAlignment="Center"/>
-                    </StackPanel>
-                </TabItem.Header>
-                <View:SettingsView DataContext="{Binding Settings}"/>
-            </TabItem>
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+            <TabControl.ContentTemplate>
+                <DataTemplate>
+                    <ContentControl Content="{Binding Content}"/>
+                </DataTemplate>
+            </TabControl.ContentTemplate>
         </TabControl>
 
         <!-- Storage tracker: always visible, carries across every tab. Shows free space on

@@ -23,15 +23,15 @@ namespace CommandCenter.ViewModel
         Launch
     }
 
-    // Drives one section's tab (GMS / CMS / Live Service). The same view is reused for all
-    // three sections; only the wrapped SectionSettings instance, title, and server catalog
-    // differ. Every section launches by picking one of two fixed client executables plus a
-    // server from that section's own fixed catalog (see LaunchServerCatalog).
+    // Drives one tab's content (GMS / CMS / Live Service, or any extra tab). The same view is
+    // reused for every BuildSection-kind tab; only the wrapped TabSettings instance and server
+    // catalog differ. Every section launches by picking one of two fixed client executables plus
+    // a server from that section's own fixed catalog (see LaunchServerCatalog).
     public class BuildSectionViewModel : ViewModelBase
     {
         private readonly SettingsService _settingsService;
         private readonly AppSettings _appSettings;
-        private readonly SectionSettings _settings;
+        private readonly TabSettings _settings;
         private readonly Dispatcher _uiDispatcher;
 
         private SectionMode _selectedMode = SectionMode.Launch;
@@ -52,9 +52,8 @@ namespace CommandCenter.ViewModel
         private string? _documentsFolderPath;
         private FileSystemWatcher? _documentsWatcher;
 
-        public BuildSectionViewModel(string sectionTitle, SectionSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive)
+        public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive)
         {
-            SectionTitle = sectionTitle;
             _settings = settings;
             _appSettings = appSettings;
             _settingsService = settingsService;
@@ -92,7 +91,10 @@ namespace CommandCenter.ViewModel
             SyncDocumentsFolder();
         }
 
-        public string SectionTitle { get; }
+        // Reads straight from the tab's settings, so renaming a tab in Settings (GMS/CMS/Live can
+        // be renamed, same as any extra tab) is reflected here immediately once saved - see
+        // Settings_PropertyChanged - including in the Documents folder's fallback name.
+        public string SectionTitle => _settings.Title;
 
         public string CurrentBuildPath => _settings.BuildPath;
         public string VersionNumber => string.IsNullOrWhiteSpace(_settings.VersionNumber) ? "Not set" : _settings.VersionNumber;
@@ -265,7 +267,7 @@ namespace CommandCenter.ViewModel
 
         // What the Documents folder is currently named (without the containing path) - shown in
         // the UI so it's obvious which folder on disk these files live in, e.g. "1.2.3 Documents"
-        // or, before a version number is set, "GMS Documents".
+        // or, before a version number is set, "<tab name> Documents".
         public string DocumentsFolderLabel => HasBuildPath
             ? (string.IsNullOrWhiteSpace(_settings.VersionNumber)
                 ? DocumentsService.FallbackFolderName(SectionTitle)
@@ -288,15 +290,16 @@ namespace CommandCenter.ViewModel
 
         private void Settings_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
+            OnPropertyChanged(nameof(SectionTitle));
             OnPropertyChanged(nameof(CurrentBuildPath));
             OnPropertyChanged(nameof(VersionNumber));
             OnPropertyChanged(nameof(HasBuildPath));
             OnPropertyChanged(nameof(IsSelectedExecutableMissing));
             OnPropertyChanged(nameof(DocumentsFolderLabel));
 
-            // Covers both a build path being set/changed and a version number being set/changed
-            // (whether typed directly in Settings or applied from PendingVersion after a
-            // build/patch/push) - either one can change where/what this section's Documents
+            // Covers a build path, version number, or title being set/changed (whether typed
+            // directly in Settings and saved, or a version applied from PendingVersion after a
+            // build/patch/push) - any of these can change where/what this section's Documents
             // folder should be.
             SyncDocumentsFolder();
         }
@@ -501,12 +504,11 @@ namespace CommandCenter.ViewModel
         // Recomputes where this section's Documents folder should be (a sibling of
         // CurrentBuildPath, named from VersionNumber or SectionTitle - see DocumentsService), and
         // reconciles reality with that: carries an existing folder over to a new name if the
-        // version number just changed, creates it if it doesn't exist yet, and (re)starts the
-        // watcher pointed at wherever it ends up. Called once from the constructor (to rehydrate
-        // a section that already had a build path from a previous session) and on every
-        // Settings_PropertyChanged after that (build path or version number changing). No-ops
-        // until HasBuildPath is true - "the folder gets created once the selection and build name
-        // are made," not before.
+        // version number (or the tab's title) just changed, creates it if it doesn't exist yet,
+        // and (re)starts the watcher pointed at wherever it ends up. Called once from the
+        // constructor (to rehydrate a section that already had a build path from a previous
+        // session) and on every Settings_PropertyChanged after that. No-ops until HasBuildPath is
+        // true - "the folder gets created once the selection and build name are made," not before.
         private void SyncDocumentsFolder()
         {
             if (!HasBuildPath)
@@ -561,8 +563,8 @@ namespace CommandCenter.ViewModel
             RefreshDocumentsList();
         }
 
-        // Stops and disposes the watcher, if any. Public so MainViewModel can call it when an
-        // extra section is deleted (its BuildSectionViewModel is about to be dropped entirely).
+        // Stops and disposes the watcher, if any. Public so MainViewModel can call it when a tab
+        // is deleted (its BuildSectionViewModel is about to be dropped entirely).
         public void StopWatching()
         {
             if (_documentsWatcher == null)
@@ -654,9 +656,9 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        // Called by MainViewModel when this section is an extra being deleted via "+ Add Build
-        // Path" -> Delete - its documents shouldn't outlive the section itself. Never called for
-        // the permanent GMS/CMS/Live sections, which can't be deleted.
+        // Called by MainViewModel when this tab is deleted (via Settings) - its documents
+        // shouldn't outlive the tab itself. Never called for the 5 permanent tabs, which can't
+        // be deleted.
         public void DeleteDocumentsFolder()
         {
             DocumentsService.DeleteFolder(_documentsFolderPath);
