@@ -170,6 +170,12 @@ namespace CommandCenter.ViewModel
             if (_extraViewModelsById.Remove(extra.Id, out var vm))
             {
                 vm.DiskSpaceStatusChanged -= OnDiskSpaceStatusChanged;
+
+                // The extra section's Documents folder shouldn't outlive the section itself -
+                // "we don't want to keep anything from the extra builds."
+                vm.StopWatching();
+                vm.DeleteDocumentsFolder();
+
                 ExtrasFor(extra.Category).Remove(vm);
             }
         }

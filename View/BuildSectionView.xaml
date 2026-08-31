@@ -3,12 +3,13 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-             mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="520">
+             mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="620">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -104,16 +105,51 @@
             </StackPanel>
         </Grid>
 
+        <!-- Documents: always visible regardless of the mode selected above - attached to
+             whichever build this section currently points at (see DocumentsService /
+             BuildSectionViewModel.SyncDocumentsFolder). Files can be dropped straight from
+             Explorer onto the box below, or added via the button; double-click an entry to open
+             it. Auto-refreshes on any external change to the folder via a FileSystemWatcher. -->
+        <Border Grid.Row="3" Background="#FFF3F3F3" BorderBrush="#FFD0D0D0" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,12,0,0">
+            <StackPanel>
+                <TextBlock Text="{Binding DocumentsFolderLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
+
+                <TextBlock Text="Not configured. Set this section's build path in the Settings tab first." Foreground="#FFB00000" Margin="0,0,0,4"
+                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+
+                <StackPanel Visibility="{Binding HasBuildPath, Converter={StaticResource BoolToVis}}">
+                    <Border x:Name="DocumentsDropZone" MinHeight="70" MaxHeight="160" Background="White" BorderBrush="#FFB0B0B0" BorderThickness="1"
+                            AllowDrop="True" DragEnter="DocumentsDropZone_DragEnter" DragOver="DocumentsDropZone_DragEnter" Drop="DocumentsDropZone_Drop">
+                        <Grid>
+                            <TextBlock Text="No current documents for this build. Drag &amp; drop files here, or use Add File below."
+                                       TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
+                                       Visibility="{Binding HasDocuments, Converter={StaticResource InverseBoolToVis}}"/>
+                            <ListBox ItemsSource="{Binding Documents}" BorderThickness="0" MaxHeight="160"
+                                     Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"
+                                     MouseDoubleClick="DocumentsList_MouseDoubleClick">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" Margin="4,3" ToolTip="{Binding FullPath}"/>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </Grid>
+                    </Border>
+                    <Button Content="Add File..." Width="120" Padding="6,3" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding AddDocumentFilesCommand}"/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
         <!-- Progress / status: runs in the background now, so this section (and every other tab,
              and the window itself) stays fully usable while it's visible. Cancel lets you back out
              without waiting it out. -->
-        <StackPanel Grid.Row="3" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+        <StackPanel Grid.Row="4" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
             <ProgressBar Height="18" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"/>
             <DockPanel Margin="0,4,0,0">
                 <Button Content="Cancel" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding CancelUpdateCommand}"/>
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
             </DockPanel>
         </StackPanel>
-        <TextBlock Grid.Row="3" Text="{Binding StatusText}" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
+        <TextBlock Grid.Row="4" Text="{Binding StatusText}" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
     </Grid>
 </UserControl>

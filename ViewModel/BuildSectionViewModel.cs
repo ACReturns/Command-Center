@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
@@ -31,6 +32,7 @@ namespace CommandCenter.ViewModel
         private readonly SettingsService _settingsService;
         private readonly AppSettings _appSettings;
         private readonly SectionSettings _settings;
+        private readonly Dispatcher _uiDispatcher;
 
         private SectionMode _selectedMode = SectionMode.Launch;
         private string _sourceArchivePath = string.Empty;
@@ -44,6 +46,12 @@ namespace CommandCenter.ViewModel
         private CancellationTokenSource? _updateCancellation;
         private DispatcherTimer? _statusClearTimer;
 
+        // Path of this section's Documents folder (a sibling of CurrentBuildPath - see
+        // DocumentsService) and the watcher keeping its file list live. Null/None until
+        // HasBuildPath is true - see SyncDocumentsFolder.
+        private string? _documentsFolderPath;
+        private FileSystemWatcher? _documentsWatcher;
+
         public BuildSectionViewModel(string sectionTitle, SectionSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive)
         {
             SectionTitle = sectionTitle;
@@ -52,6 +60,7 @@ namespace CommandCenter.ViewModel
             _settingsService = settingsService;
             ServerOptions = serverOptions;
             SupportsPushedToLive = supportsPushedToLive;
+            _uiDispatcher = Dispatcher.CurrentDispatcher;
 
             _settings.PropertyChanged += Settings_PropertyChanged;
 
@@ -65,8 +74,22 @@ namespace CommandCenter.ViewModel
             // can ever be in flight at a time per section, both gated by IsBusy.
             PushToLiveCommand = new AsyncRelayCommand(_ => PushToLiveAsync(), _ => !IsBusy && SupportsPushedToLive && !string.IsNullOrWhiteSpace(PushSourceFolderPath) && HasBuildPath);
 
+            AddDocumentFilesCommand = new RelayCommand(_ => AddDocumentFiles(), _ => HasBuildPath);
+            OpenDocumentCommand = new RelayCommand(param =>
+            {
+                if (param is DocumentEntry entry)
+                {
+                    OpenDocument(entry);
+                }
+            });
+            Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
+
             _selectedExecutable = ExecutableOptions.FirstOrDefault();
             _selectedServerOption = ServerOptions.FirstOrDefault();
+
+            // Rehydrate the Documents folder (and start watching it) if this section already had
+            // a build path configured from a previous session.
+            SyncDocumentsFolder();
         }
 
         public string SectionTitle { get; }
@@ -234,12 +257,29 @@ namespace CommandCenter.ViewModel
             HasBuildPath && !string.IsNullOrEmpty(SelectedExecutable) &&
             !File.Exists(Path.Combine(CurrentBuildPath, SelectedExecutable));
 
+        // Documents attached to whichever build this section currently points at - see
+        // DocumentsService and SyncDocumentsFolder for how the backing folder is chosen,
+        // created, and kept in sync with the build path/version number.
+        public ObservableCollection<DocumentEntry> Documents { get; } = new();
+        public bool HasDocuments => Documents.Count > 0;
+
+        // What the Documents folder is currently named (without the containing path) - shown in
+        // the UI so it's obvious which folder on disk these files live in, e.g. "1.2.3 Documents"
+        // or, before a version number is set, "GMS Documents".
+        public string DocumentsFolderLabel => HasBuildPath
+            ? (string.IsNullOrWhiteSpace(_settings.VersionNumber)
+                ? DocumentsService.FallbackFolderName(SectionTitle)
+                : DocumentsService.VersionedFolderName(_settings.VersionNumber))
+            : $"{SectionTitle} Documents";
+
         public RelayCommand BrowseSourceCommand { get; }
         public AsyncRelayCommand RunUpdateCommand { get; }
         public RelayCommand CancelUpdateCommand { get; }
         public RelayCommand LaunchCommand { get; }
         public RelayCommand BrowsePushSourceCommand { get; }
         public AsyncRelayCommand PushToLiveCommand { get; }
+        public RelayCommand AddDocumentFilesCommand { get; }
+        public RelayCommand OpenDocumentCommand { get; }
 
         // Raised right after a build/patch finishes extracting, with this section's build-drive
         // free-space status (or null if it couldn't be checked). MainViewModel subscribes to this
@@ -252,6 +292,13 @@ namespace CommandCenter.ViewModel
             OnPropertyChanged(nameof(VersionNumber));
             OnPropertyChanged(nameof(HasBuildPath));
             OnPropertyChanged(nameof(IsSelectedExecutableMissing));
+            OnPropertyChanged(nameof(DocumentsFolderLabel));
+
+            // Covers both a build path being set/changed and a version number being set/changed
+            // (whether typed directly in Settings or applied from PendingVersion after a
+            // build/patch/push) - either one can change where/what this section's Documents
+            // folder should be.
+            SyncDocumentsFolder();
         }
 
         private void BrowseSource()
@@ -385,6 +432,10 @@ namespace CommandCenter.ViewModel
 
                 if (!string.IsNullOrWhiteSpace(PendingVersion))
                 {
+                    // Setting VersionNumber raises Settings_PropertyChanged -> SyncDocumentsFolder,
+                    // which carries this section's existing Documents folder over to the new
+                    // version-named folder - "along with the build, keep the documents with the
+                    // build" for Pushed to Live specifically asked for.
                     _settings.VersionNumber = PendingVersion;
                     _settingsService.Save(_appSettings);
                     PendingVersion = string.Empty;
@@ -445,6 +496,171 @@ namespace CommandCenter.ViewModel
                 StatusText = $"Launch failed: {ex.Message}";
                 MessageBox.Show(ex.Message, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
+        }
+
+        // Recomputes where this section's Documents folder should be (a sibling of
+        // CurrentBuildPath, named from VersionNumber or SectionTitle - see DocumentsService), and
+        // reconciles reality with that: carries an existing folder over to a new name if the
+        // version number just changed, creates it if it doesn't exist yet, and (re)starts the
+        // watcher pointed at wherever it ends up. Called once from the constructor (to rehydrate
+        // a section that already had a build path from a previous session) and on every
+        // Settings_PropertyChanged after that (build path or version number changing). No-ops
+        // until HasBuildPath is true - "the folder gets created once the selection and build name
+        // are made," not before.
+        private void SyncDocumentsFolder()
+        {
+            if (!HasBuildPath)
+            {
+                StopWatching();
+                _documentsFolderPath = null;
+                Documents.Clear();
+                return;
+            }
+
+            string? newPath = DocumentsService.FolderPathFor(CurrentBuildPath, DocumentsFolderLabel);
+            if (newPath == null)
+            {
+                return;
+            }
+
+            if (string.Equals(_documentsFolderPath, newPath, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            DocumentsService.RenameFolder(_documentsFolderPath, newPath);
+            DocumentsService.EnsureFolder(newPath);
+            _documentsFolderPath = newPath;
+            StartWatching(newPath);
+        }
+
+        private void StartWatching(string path)
+        {
+            StopWatching();
+
+            try
+            {
+                _documentsWatcher = new FileSystemWatcher(path)
+                {
+                    IncludeSubdirectories = false,
+                    NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName
+                };
+                _documentsWatcher.Created += OnDocumentsFolderChanged;
+                _documentsWatcher.Deleted += OnDocumentsFolderChanged;
+                _documentsWatcher.Renamed += OnDocumentsFolderChanged;
+                _documentsWatcher.EnableRaisingEvents = true;
+            }
+            catch (IOException)
+            {
+                // Folder vanished out from under us between EnsureFolder and here (e.g. deleted
+                // externally) - the list just won't auto-refresh until the next settings change
+                // re-runs SyncDocumentsFolder.
+                _documentsWatcher = null;
+            }
+
+            RefreshDocumentsList();
+        }
+
+        // Stops and disposes the watcher, if any. Public so MainViewModel can call it when an
+        // extra section is deleted (its BuildSectionViewModel is about to be dropped entirely).
+        public void StopWatching()
+        {
+            if (_documentsWatcher == null)
+            {
+                return;
+            }
+
+            _documentsWatcher.EnableRaisingEvents = false;
+            _documentsWatcher.Created -= OnDocumentsFolderChanged;
+            _documentsWatcher.Deleted -= OnDocumentsFolderChanged;
+            _documentsWatcher.Renamed -= OnDocumentsFolderChanged;
+            _documentsWatcher.Dispose();
+            _documentsWatcher = null;
+        }
+
+        // FileSystemWatcher raises events on a thread-pool thread, never the UI thread - marshal
+        // back before touching the ObservableCollection bound to the UI.
+        private void OnDocumentsFolderChanged(object sender, FileSystemEventArgs e)
+        {
+            _uiDispatcher.BeginInvoke(new Action(RefreshDocumentsList));
+        }
+
+        private void RefreshDocumentsList()
+        {
+            Documents.Clear();
+
+            if (_documentsFolderPath == null)
+            {
+                return;
+            }
+
+            foreach (var entry in DocumentsService.ListEntries(_documentsFolderPath))
+            {
+                Documents.Add(entry);
+            }
+        }
+
+        private void AddDocumentFiles()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = $"Add documents to {SectionTitle}",
+                Multiselect = true,
+                CheckFileExists = true,
+                Filter = "All Files (*.*)|*.*"
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                ImportDocumentPaths(dialog.FileNames);
+            }
+        }
+
+        // Copies the given files/folders (from the "Add File..." dialog, or dropped in from
+        // Explorer - see BuildSectionView's drag-and-drop handlers) into this section's Documents
+        // folder, creating it first if this is the very first document added.
+        public void ImportDocumentPaths(IEnumerable<string> paths)
+        {
+            if (!HasBuildPath)
+            {
+                return;
+            }
+
+            if (_documentsFolderPath == null)
+            {
+                SyncDocumentsFolder();
+                if (_documentsFolderPath == null)
+                {
+                    return;
+                }
+            }
+
+            DocumentsService.AddPaths(_documentsFolderPath, paths);
+            RefreshDocumentsList();
+        }
+
+        private void OpenDocument(DocumentEntry entry)
+        {
+            try
+            {
+                var process = new Process();
+                process.StartInfo.FileName = entry.FullPath;
+                process.StartInfo.UseShellExecute = true;
+                process.Start();
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Couldn't open {entry.Name}: {ex.Message}";
+            }
+        }
+
+        // Called by MainViewModel when this section is an extra being deleted via "+ Add Build
+        // Path" -> Delete - its documents shouldn't outlive the section itself. Never called for
+        // the permanent GMS/CMS/Live sections, which can't be deleted.
+        public void DeleteDocumentsFolder()
+        {
+            DocumentsService.DeleteFolder(_documentsFolderPath);
+            _documentsFolderPath = null;
         }
     }
 }
