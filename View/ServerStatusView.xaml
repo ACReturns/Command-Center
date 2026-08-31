@@ -19,7 +19,23 @@
 
         <DataTemplate x:Key="GroupTemplate">
             <Border Background="#FFEFF2F7" BorderBrush="#FFD7DCE3" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,0,0,12">
-                <Expander Header="{Binding Title}" IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Title}" VerticalAlignment="Center"/>
+                            <!-- Rename/Delete: only ever shown for a group added via "Add New Server" -
+                                 the 3 built-in groups (Live/Staging/Test) have IsCustom = false. -->
+                            <StackPanel Orientation="Horizontal" Margin="16,0,0,0"
+                                        Visibility="{Binding IsCustom, Converter={StaticResource BoolToVis}}">
+                                <Button Content="Rename" Padding="6,2" FontSize="11"
+                                        Command="{Binding DataContext.RenameServerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"/>
+                                <Button Content="Delete" Padding="6,2" Margin="6,0,0,0" FontSize="11"
+                                        Command="{Binding DataContext.DeleteServerCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                        CommandParameter="{Binding}"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander.Header>
                     <StackPanel Margin="12,8,0,0">
                         <DockPanel Margin="0,0,0,8">
                             <Button DockPanel.Dock="Right" Content="Refresh" Width="80" Command="{Binding RefreshCommand}"/>
@@ -48,6 +64,7 @@
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
             <TextBlock Text="Server Status" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
             <Button Content="Refresh All" Margin="16,0,0,0" Padding="8,4" Command="{Binding RefreshAllCommand}"/>
+            <Button Content="Add New Server" Margin="8,0,0,0" Padding="8,4" Command="{Binding AddServerCommand}"/>
             <Button Content="Close" Margin="8,0,0,0" Padding="8,4" Command="{Binding CloseCommand}"/>
         </StackPanel>
 

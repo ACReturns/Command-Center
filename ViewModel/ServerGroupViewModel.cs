@@ -17,18 +17,37 @@ namespace CommandCenter.ViewModel
         private readonly string _worldsFilePath;
         private bool _isRefreshing;
         private bool _isExpanded;
+        private string _title;
 
-        public ServerGroupViewModel(string title, string worldsFilePath, bool initiallyExpanded)
+        // Non-null only for a group added via Server Status' "Add New Server" - ties this group
+        // back to its CustomServerGroupSettings entry so ServerStatusViewModel can find and update
+        // (or remove) that entry without matching on Title, which the user can change. Null for the
+        // 3 built-in groups (Live/Staging/Test), which aren't in CustomGroups at all and can't be
+        // renamed/deleted (see IsCustom).
+        public ServerGroupViewModel(string title, string worldsFilePath, bool initiallyExpanded, Guid? customGroupId = null)
         {
-            Title = title;
+            _title = title;
             _worldsFilePath = worldsFilePath;
             _isExpanded = initiallyExpanded;
+            CustomGroupId = customGroupId;
 
             RefreshCommand = new AsyncRelayCommand(_ => RefreshAsync());
             LoadWorlds();
         }
 
-        public string Title { get; }
+        // Settable (not just get-only) so ServerStatusViewModel.RenameServer can update it in place
+        // and have the Expander header pick the new text up immediately via binding.
+        public string Title
+        {
+            get => _title;
+            set => SetProperty(ref _title, value);
+        }
+
+        public Guid? CustomGroupId { get; }
+
+        // Drives the Rename/Delete buttons' visibility in ServerStatusView - only ever true for a
+        // group loaded from CustomGroups, never for Live/Staging/Test.
+        public bool IsCustom => CustomGroupId.HasValue;
         public ObservableCollection<ServerWorldStatusViewModel> Worlds { get; } = new();
         public AsyncRelayCommand RefreshCommand { get; }
 

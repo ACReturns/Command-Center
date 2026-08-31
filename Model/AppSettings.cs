@@ -62,6 +62,22 @@ namespace CommandCenter.Model
         public bool LiveExpanded { get; set; } = false;
         public bool StagingExpanded { get; set; } = false;
         public bool TestExpanded { get; set; } = true;
+
+        // User-added groups from Server Status' "Add New Server" (each backed by its own json
+        // copied into the Servers folder). Order here is display order - always after the 3
+        // built-in groups. See CustomServerGroupSettings.
+        public List<CustomServerGroupSettings> CustomGroups { get; set; } = new();
+    }
+
+    // One user-added Server Status group. FileName is just the file name (not a full path) -
+    // always resolved against AppPaths.ServersFolder, same as the 3 built-in groups, so it stays
+    // valid even if the app is reinstalled to a different folder.
+    public class CustomServerGroupSettings
+    {
+        public Guid Id { get; set; } = Guid.NewGuid();
+        public string Title { get; set; } = string.Empty;
+        public string FileName { get; set; } = string.Empty;
+        public bool IsExpanded { get; set; } = true;
     }
 
     public class AppSettings
