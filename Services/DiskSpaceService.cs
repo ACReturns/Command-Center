@@ -9,7 +9,14 @@ namespace CommandCenter.Services
     // a number to show right away) and again every time a build/patch finishes extracting.
     public static class DiskSpaceService
     {
-        public const long LowSpaceThresholdBytes = 70L * 1024 * 1024 * 1024; // 70 GB
+        // "Need more space" cutoff - IsLow flips true here, the tracker's text goes bold/urgent,
+        // and this is also the fully-red end of the tracker's green-to-red color gradient.
+        public const long LowSpaceThresholdBytes = 60L * 1024 * 1024 * 1024; // 60 GB
+
+        // Free space at/above this is shown fully green ("plenty of space"); the tracker's
+        // background/text color gradient runs from here down to LowSpaceThresholdBytes, so the
+        // color shift becomes visible well before the hard warning kicks in.
+        public const long ComfortableSpaceThresholdBytes = 150L * 1024 * 1024 * 1024; // 150 GB
 
         // Returns the current free-space status for the drive containing `path`, or null if the
         // path/drive can't be resolved (e.g. build path not set yet, or drive not ready).

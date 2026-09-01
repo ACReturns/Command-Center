@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Media;
 using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
@@ -167,6 +168,9 @@ namespace CommandCenter.ViewModel
                 {
                     OnPropertyChanged(nameof(StorageTrackerText));
                     OnPropertyChanged(nameof(IsStorageLow));
+                    OnPropertyChanged(nameof(StorageBackgroundBrush));
+                    OnPropertyChanged(nameof(StorageBorderBrush));
+                    OnPropertyChanged(nameof(StorageForegroundBrush));
                 }
             }
         }
@@ -179,6 +183,81 @@ namespace CommandCenter.ViewModel
         };
 
         public bool IsStorageLow => StorageStatus?.IsLow ?? false;
+
+        // Storage tracker color gradient: green while space is comfortable, sliding smoothly
+        // through yellow/orange to red as free space drops toward LowSpaceThresholdBytes (60GB) -
+        // so the space situation is visible at a glance well before it becomes a hard warning,
+        // rather than the bar jumping from "fine" to "low" with nothing in between.
+        // Background/border are pastel tints of that same color; the text uses a darker,
+        // more saturated shade of it so it always reads clearly against its own background.
+        private static readonly double ComfortableFreeGb =
+            DiskSpaceService.ComfortableSpaceThresholdBytes / 1024.0 / 1024.0 / 1024.0;
+        private static readonly double CriticalFreeGb =
+            DiskSpaceService.LowSpaceThresholdBytes / 1024.0 / 1024.0 / 1024.0;
+
+        private static readonly Brush NeutralBackgroundBrush = FrozenBrush(0xF0, 0xF0, 0xF0);
+        private static readonly Brush NeutralBorderBrush = FrozenBrush(0xD0, 0xD0, 0xD0);
+        private static readonly Brush NeutralForegroundBrush = FrozenBrush(0x40, 0x40, 0x40);
+
+        public Brush StorageBackgroundBrush =>
+            StorageStatus == null ? NeutralBackgroundBrush : GradientBrush(StorageStatus.FreeGigabytes, saturation: 0.55, lightness: 0.90);
+
+        public Brush StorageBorderBrush =>
+            StorageStatus == null ? NeutralBorderBrush : GradientBrush(StorageStatus.FreeGigabytes, saturation: 0.55, lightness: 0.72);
+
+        public Brush StorageForegroundBrush =>
+            StorageStatus == null ? NeutralForegroundBrush : GradientBrush(StorageStatus.FreeGigabytes, saturation: 0.70, lightness: 0.28);
+
+        // 0 = comfortable (>= ComfortableFreeGb, full green) .. 1 = critical (<= CriticalFreeGb, full red).
+        private static double GradientPosition(double freeGb)
+        {
+            if (ComfortableFreeGb <= CriticalFreeGb)
+            {
+                return freeGb <= CriticalFreeGb ? 1 : 0;
+            }
+
+            double t = (ComfortableFreeGb - freeGb) / (ComfortableFreeGb - CriticalFreeGb);
+            return Math.Clamp(t, 0.0, 1.0);
+        }
+
+        private static Brush GradientBrush(double freeGb, double saturation, double lightness)
+        {
+            double hue = 120.0 - 120.0 * GradientPosition(freeGb); // 120 = green, 0 = red
+            var brush = new SolidColorBrush(HslToColor(hue, saturation, lightness));
+            brush.Freeze();
+            return brush;
+        }
+
+        private static Brush FrozenBrush(byte r, byte g, byte b)
+        {
+            var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+            brush.Freeze();
+            return brush;
+        }
+
+        // h: 0-360, s/l: 0-1. Standard HSL->RGB conversion so the gradient sweeps through a
+        // natural green -> yellow -> orange -> red rather than a muddy straight-line RGB blend.
+        private static Color HslToColor(double h, double s, double l)
+        {
+            double c = (1 - Math.Abs(2 * l - 1)) * s;
+            double x = c * (1 - Math.Abs(h / 60.0 % 2 - 1));
+            double m = l - c / 2;
+
+            (double r1, double g1, double b1) = h switch
+            {
+                < 60 => (c, x, 0.0),
+                < 120 => (x, c, 0.0),
+                < 180 => (0.0, c, x),
+                < 240 => (0.0, x, c),
+                < 300 => (x, 0.0, c),
+                _ => (c, 0.0, x)
+            };
+
+            return Color.FromRgb(
+                (byte)Math.Round((r1 + m) * 255),
+                (byte)Math.Round((g1 + m) * 255),
+                (byte)Math.Round((b1 + m) * 255));
+        }
 
         private void OnDiskSpaceStatusChanged(object? sender, DiskSpaceStatus? status)
         {

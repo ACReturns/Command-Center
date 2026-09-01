@@ -142,27 +142,18 @@
 
         <!-- Storage tracker: always visible, carries across every tab. Shows free space on
              whichever section's build drive was checked most recently (startup, or the last
-             completed extraction); switches to a warning style once that drive drops under 70GB. -->
-        <Border Grid.Row="2" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Background" Value="#FFF0F0F0"/>
-                    <Setter Property="BorderBrush" Value="#FFD0D0D0"/>
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding IsStorageLow}" Value="True">
-                            <Setter Property="Background" Value="#FFFFF3CD"/>
-                            <Setter Property="BorderBrush" Value="#FFE0B400"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
-            <TextBlock Text="{Binding StorageTrackerText}" TextWrapping="Wrap">
+             completed extraction). The strip is color-coded on a continuous green -> yellow ->
+             red gradient (MainViewModel.StorageBackgroundBrush/StorageBorderBrush/
+             StorageForegroundBrush) so the space situation is visible at a glance well before it
+             becomes critical, not just once it crosses a single warning line. Text still goes
+             bold once free space actually drops under the low-space threshold (IsStorageLow). -->
+        <Border Grid.Row="2" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6"
+                Background="{Binding StorageBackgroundBrush}" BorderBrush="{Binding StorageBorderBrush}">
+            <TextBlock Text="{Binding StorageTrackerText}" TextWrapping="Wrap" Foreground="{Binding StorageForegroundBrush}">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
-                        <Setter Property="Foreground" Value="#FF404040"/>
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStorageLow}" Value="True">
-                                <Setter Property="Foreground" Value="#FF7A5B00"/>
                                 <Setter Property="FontWeight" Value="SemiBold"/>
                             </DataTrigger>
                         </Style.Triggers>
