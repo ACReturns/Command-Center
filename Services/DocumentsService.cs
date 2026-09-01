@@ -18,18 +18,42 @@ namespace CommandCenter.Services
     // is never in their blast radius - the documents just sit there, untouched, through every
     // build/patch/push. See BuildSectionViewModel.SyncDocumentsFolder for the
     // create/rename/watch lifecycle that drives this from the settings side.
+    //
+    // Folder naming is keyed off the version FAMILY, not the exact version - see VersionFamily -
+    // so "271.0.2 Documents" becomes "271 Documents" and stays that way through every later
+    // 271.x bump; only a genuinely new family (e.g. "272.0.1") gets its own new folder.
     public static class DocumentsService
     {
         // Folder name for the "no build name set yet" fallback, e.g. "GMS Documents".
         public static string FallbackFolderName(string sectionTitle) => $"{sectionTitle} Documents";
 
-        // Folder name once a build/version name has been set, e.g. "1.2.3 Documents".
-        public static string VersionedFolderName(string versionNumber) => $"{versionNumber} Documents";
+        // The "version family" a build/version name belongs to - everything before the first
+        // delimiter, e.g. "271" for both "271.0.2" and "271.0.3". Two versions in the same family
+        // share one Documents folder instead of getting a new one for every single version bump;
+        // a version with no delimiter at all (or an empty string) is its own family. Falls back to
+        // the whole string when there's no '.' to split on.
+        public static string VersionFamily(string versionNumber)
+        {
+            if (string.IsNullOrWhiteSpace(versionNumber))
+            {
+                return string.Empty;
+            }
 
-        // The documents folder for a section: a sibling of its build folder, named per
-        // FallbackFolderName/VersionedFolderName above. Null when there's no build path to sit
-        // beside yet.
-        public static string? FolderPathFor(string buildPath, string folderName)
+            string trimmed = versionNumber.Trim();
+            int delimiterIndex = trimmed.IndexOf('.');
+            return delimiterIndex > 0 ? trimmed[..delimiterIndex] : trimmed;
+        }
+
+        // Folder name once a build/version name has been set, keyed off the version FAMILY (see
+        // VersionFamily above) rather than the exact version - e.g. "271 Documents" for both
+        // "271.0.2" and "271.0.3", so the folder stays put and just keeps accumulating documents
+        // as the version climbs within that family. A genuinely new family (e.g. "272.0.1") maps
+        // to a different folder name ("272 Documents"), which BuildSectionViewModel.SyncDocumentsFolder
+        // treats as a fresh folder rather than renaming the old family's into it - see that method
+        // for why.
+        public static string VersionedFolderName(string versionNumber) => $"{VersionFamily(versionNumber)} Documents";
+
+        private static string? BaseDirFor(string buildPath)
         {
             if (string.IsNullOrWhiteSpace(buildPath))
             {
@@ -42,8 +66,50 @@ namespace CommandCenter.Services
             // A build path sitting at a drive root (e.g. "D:\") has no parent to be a sibling of -
             // fall back to nesting the documents folder inside the build path itself rather than
             // throwing. (Everywhere else, this stays a true sibling, outside the build folder.)
-            string baseDir = string.IsNullOrEmpty(parent) ? trimmed : parent;
-            return Path.Combine(baseDir, folderName);
+            return string.IsNullOrEmpty(parent) ? trimmed : parent;
+        }
+
+        // The documents folder for a section: a sibling of its build folder, named per
+        // FallbackFolderName/VersionedFolderName above. Null when there's no build path to sit
+        // beside yet.
+        public static string? FolderPathFor(string buildPath, string folderName)
+        {
+            string? baseDir = BaseDirFor(buildPath);
+            return baseDir == null ? null : Path.Combine(baseDir, folderName);
+        }
+
+        // One-time adoption for folders created before version-family grouping existed: if a
+        // family's folder (e.g. "271 Documents") doesn't exist yet but an old exact-version
+        // folder that belongs to the same family is still sitting there (e.g. a lingering
+        // "271.0.2 Documents" from before this naming scheme), that's the folder to fold in
+        // instead of starting empty - existing documents shouldn't appear to vanish just because
+        // the naming scheme changed. Picks the most recently modified match if more than one is
+        // found. Returns null if nothing matches.
+        public static string? FindLegacyFamilyFolder(string buildPath, string family)
+        {
+            string? baseDir = BaseDirFor(buildPath);
+            if (baseDir == null || !Directory.Exists(baseDir))
+            {
+                return null;
+            }
+
+            const string suffix = " Documents";
+            string prefix = family + ".";
+
+            return Directory.GetDirectories(baseDir)
+                .Where(dir =>
+                {
+                    string name = Path.GetFileName(dir);
+                    if (!name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    string versionPart = name[..^suffix.Length];
+                    return versionPart.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+                })
+                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault();
         }
 
         public static void EnsureFolder(string folderPath) => Directory.CreateDirectory(folderPath);
@@ -163,6 +229,29 @@ namespace CommandCenter.Services
             catch
             {
                 // Best-effort - see summary above.
+            }
+        }
+
+        // Deletes ONE entry (a file or a whole subfolder) out of a documents folder - what backs
+        // the Delete button/Delete key for a selected item in the Documents list, after
+        // BuildSectionViewModel.DeleteDocument has already confirmed with the user. Unlike
+        // DeleteFolder/RenameFolder above, this is deliberately NOT wrapped in try/catch: those
+        // run automatically as a side effect of a settings change, where silently leaving a
+        // locked file behind is the right failure mode, but this is a direct, just-confirmed user
+        // action on a single item, so a failure (locked file, permissions) should surface back to
+        // the caller as an error rather than being swallowed.
+        public static void DeleteEntry(string path, bool isDirectory)
+        {
+            if (isDirectory)
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+            }
+            else if (File.Exists(path))
+            {
+                File.Delete(path);
             }
         }
     }

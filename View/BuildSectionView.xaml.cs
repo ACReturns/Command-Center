@@ -44,5 +44,22 @@ namespace CommandCenter.View
                 vm.OpenDocumentCommand.Execute(entry);
             }
         }
+
+        // Delete key on the selected document/folder - same confirm-then-delete path as the
+        // Delete button (DeleteDocumentCommand, bound to the same ListBox's SelectedItem).
+        private void DocumentsList_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key != Key.Delete)
+            {
+                return;
+            }
+
+            if (sender is ListBox { SelectedItem: DocumentEntry entry } && DataContext is BuildSectionViewModel vm
+                && vm.DeleteDocumentCommand.CanExecute(entry))
+            {
+                vm.DeleteDocumentCommand.Execute(entry);
+                e.Handled = true;
+            }
+        }
     }
 }

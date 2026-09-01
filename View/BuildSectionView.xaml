@@ -154,9 +154,10 @@
                             <TextBlock Text="No current documents for this build. Drag &amp; drop files here, or use Add File below."
                                        TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
                                        Visibility="{Binding HasDocuments, Converter={StaticResource InverseBoolToVis}}"/>
-                            <ListBox ItemsSource="{Binding Documents}" BorderThickness="0" MaxHeight="160"
+                            <ListBox x:Name="DocumentsListBox" ItemsSource="{Binding Documents}" BorderThickness="0" MaxHeight="160"
                                      Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"
-                                     MouseDoubleClick="DocumentsList_MouseDoubleClick">
+                                     MouseDoubleClick="DocumentsList_MouseDoubleClick"
+                                     PreviewKeyDown="DocumentsList_PreviewKeyDown">
                                 <ListBox.ItemTemplate>
                                     <DataTemplate>
                                         <TextBlock Text="{Binding Name}" Margin="4,3" ToolTip="{Binding FullPath}"/>
@@ -165,7 +166,19 @@
                             </ListBox>
                         </Grid>
                     </Border>
-                    <Button Content="Add File..." Width="120" Padding="6,3" HorizontalAlignment="Left" Margin="0,8,0,0" Command="{Binding AddDocumentFilesCommand}"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <!-- Opens the Documents folder itself (not a specific entry) in Explorer -
+                             the current version-family folder per DocumentsFolderLabel above. -->
+                        <Button Content="Open Folder" Width="100" Padding="6,3"
+                                Command="{Binding OpenDocumentsFolderCommand}"/>
+                        <Button Content="Add File..." Width="120" Padding="6,3" Margin="8,0,0,0" Command="{Binding AddDocumentFilesCommand}"/>
+                        <!-- Deletes whatever's selected in the list above (also removable via the
+                             Delete key - see DocumentsList_PreviewKeyDown); BuildSectionViewModel.
+                             DeleteDocument confirms first, since this is a permanent delete. -->
+                        <Button Content="Delete" Width="90" Padding="6,3" Margin="8,0,0,0"
+                                Command="{Binding DeleteDocumentCommand}"
+                                CommandParameter="{Binding SelectedItem, ElementName=DocumentsListBox}"/>
+                    </StackPanel>
                 </StackPanel>
             </StackPanel>
         </Border>

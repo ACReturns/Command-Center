@@ -62,6 +62,12 @@ namespace CommandCenter.ViewModel
         // DocumentsService) and the watcher keeping its file list live. Null/None until
         // HasBuildPath is true - see SyncDocumentsFolder.
         private string? _documentsFolderPath;
+        // The version family (see DocumentsService.VersionFamily) _documentsFolderPath currently
+        // belongs to - null while no version is set (the folder is the SectionTitle fallback).
+        // Tracked separately from _documentsFolderPath so SyncDocumentsFolder can tell "same
+        // family, version just bumped" apart from "genuinely different family" even though both
+        // change the computed path.
+        private string? _documentsFamily;
         private FileSystemWatcher? _documentsWatcher;
 
         public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive, ObservableCollection<TabInfo>? allTabs = null)
@@ -94,6 +100,19 @@ namespace CommandCenter.ViewModel
                     OpenDocument(entry);
                 }
             });
+            // Parameter comes from the Documents ListBox's SelectedItem (bound via CommandParameter
+            // on the Delete button, or passed directly from the Delete-key handler in code-behind -
+            // see BuildSectionView.xaml/.xaml.cs) - null (nothing selected) just disables the button.
+            DeleteDocumentCommand = new RelayCommand(param =>
+            {
+                if (param is DocumentEntry entry)
+                {
+                    DeleteDocument(entry);
+                }
+            }, param => param is DocumentEntry);
+            // No parameter - opens the section's whole Documents folder (whichever version-family
+            // folder is current, per SyncDocumentsFolder), not a specific entry inside it.
+            OpenDocumentsFolderCommand = new RelayCommand(_ => OpenDocumentsFolder(), _ => _documentsFolderPath != null);
             Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
 
             _selectedExecutable = ExecutableOptions.FirstOrDefault();
@@ -336,8 +355,9 @@ namespace CommandCenter.ViewModel
         public bool HasDocuments => Documents.Count > 0;
 
         // What the Documents folder is currently named (without the containing path) - shown in
-        // the UI so it's obvious which folder on disk these files live in, e.g. "1.2.3 Documents"
-        // or, before a version number is set, "<tab name> Documents".
+        // the UI so it's obvious which folder on disk these files live in, e.g. "271 Documents"
+        // for any version in that family (271.0.2, 271.0.3, ...), or, before a version number is
+        // set, "<tab name> Documents".
         public string DocumentsFolderLabel => HasBuildPath
             ? (string.IsNullOrWhiteSpace(_settings.VersionNumber)
                 ? DocumentsService.FallbackFolderName(SectionTitle)
@@ -352,6 +372,8 @@ namespace CommandCenter.ViewModel
         public AsyncRelayCommand PushToLiveCommand { get; }
         public RelayCommand AddDocumentFilesCommand { get; }
         public RelayCommand OpenDocumentCommand { get; }
+        public RelayCommand DeleteDocumentCommand { get; }
+        public RelayCommand OpenDocumentsFolderCommand { get; }
 
         // Raised right after a build/patch finishes extracting, with this section's build-drive
         // free-space status (or null if it couldn't be checked). MainViewModel subscribes to this
@@ -704,22 +726,38 @@ namespace CommandCenter.ViewModel
         }
 
         // Recomputes where this section's Documents folder should be (a sibling of
-        // CurrentBuildPath, named from VersionNumber or SectionTitle - see DocumentsService), and
-        // reconciles reality with that: carries an existing folder over to a new name if the
-        // version number (or the tab's title) just changed, creates it if it doesn't exist yet,
-        // and (re)starts the watcher pointed at wherever it ends up. Called once from the
-        // constructor (to rehydrate a section that already had a build path from a previous
-        // session) and on every Settings_PropertyChanged after that. No-ops until HasBuildPath is
-        // true - "the folder gets created once the selection and build name are made," not before.
+        // CurrentBuildPath, named from VersionNumber's family or SectionTitle - see
+        // DocumentsService), and reconciles reality with that, then (re)starts the watcher
+        // pointed at wherever it ends up. Called once from the constructor (to rehydrate a
+        // section that already had a build path from a previous session) and on every
+        // Settings_PropertyChanged after that. No-ops until HasBuildPath is true - "the folder
+        // gets created once the selection and build name are made," not before.
+        //
+        // A version bump that stays within the same family (271.0.2 -> 271.0.3) computes the
+        // same path as before, so the early-return below is all that happens - the folder just
+        // keeps accumulating documents as the family's versions climb. Every OTHER kind of
+        // change (no version -> first version, a tab rename while no version is set, or a version
+        // being cleared back out) carries the existing folder's contents over to the new name,
+        // same as before family-grouping existed. The one exception is a change to a genuinely
+        // different family (e.g. 271.x -> 272.x): that does NOT carry the old folder over - "271
+        // Documents" is left exactly where it is as its own archive, and the new family gets its
+        // own fresh folder (adopting an old exact-version-named folder for that family if one is
+        // still sitting there from before this naming scheme, so nothing already on disk goes
+        // missing).
         private void SyncDocumentsFolder()
         {
             if (!HasBuildPath)
             {
                 StopWatching();
                 _documentsFolderPath = null;
+                _documentsFamily = null;
                 Documents.Clear();
                 return;
             }
+
+            string? currentFamily = string.IsNullOrWhiteSpace(_settings.VersionNumber)
+                ? null
+                : DocumentsService.VersionFamily(_settings.VersionNumber);
 
             string? newPath = DocumentsService.FolderPathFor(CurrentBuildPath, DocumentsFolderLabel);
             if (newPath == null)
@@ -729,12 +767,41 @@ namespace CommandCenter.ViewModel
 
             if (string.Equals(_documentsFolderPath, newPath, StringComparison.OrdinalIgnoreCase))
             {
+                _documentsFamily = currentFamily;
                 return;
             }
 
-            DocumentsService.RenameFolder(_documentsFolderPath, newPath);
+            bool isNewFamily = currentFamily != null &&
+                !string.Equals(_documentsFamily, currentFamily, StringComparison.OrdinalIgnoreCase);
+
+            if (isNewFamily)
+            {
+                if (_documentsFamily == null)
+                {
+                    // Coming from "no family yet" (the SectionTitle fallback, or a fresh app
+                    // start with nothing rehydrated in memory) - carry any existing folder over,
+                    // same as every other rename below. If there was nothing to carry (a true
+                    // fresh start), this is a no-op and the legacy-adoption check right after
+                    // picks up any old on-disk folder instead.
+                    DocumentsService.RenameFolder(_documentsFolderPath, newPath);
+                }
+                // else: a genuinely different family - leave that old family's folder exactly
+                // where it is rather than folding it into the new one.
+
+                if (!Directory.Exists(newPath))
+                {
+                    string? legacy = DocumentsService.FindLegacyFamilyFolder(CurrentBuildPath, currentFamily!);
+                    DocumentsService.RenameFolder(legacy, newPath);
+                }
+            }
+            else
+            {
+                DocumentsService.RenameFolder(_documentsFolderPath, newPath);
+            }
+
             DocumentsService.EnsureFolder(newPath);
             _documentsFolderPath = newPath;
+            _documentsFamily = currentFamily;
             StartWatching(newPath);
         }
 
@@ -858,6 +925,66 @@ namespace CommandCenter.ViewModel
             }
         }
 
+        // Opens the section's Documents folder itself (whichever version-family folder
+        // SyncDocumentsFolder currently has it pointed at, e.g. "271 Documents") in Explorer -
+        // the "Open Folder" button next to Add File/Delete. EnsureFolder first since nothing
+        // guarantees the folder still exists on disk (could've been deleted externally since the
+        // watcher last ran) - same ShellExecute approach as OpenDocument above, just pointed at
+        // the folder instead of one entry inside it.
+        private void OpenDocumentsFolder()
+        {
+            if (_documentsFolderPath == null)
+            {
+                return;
+            }
+
+            try
+            {
+                DocumentsService.EnsureFolder(_documentsFolderPath);
+                var process = new Process();
+                process.StartInfo.FileName = _documentsFolderPath;
+                process.StartInfo.UseShellExecute = true;
+                process.Start();
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Couldn't open the Documents folder: {ex.Message}";
+            }
+        }
+
+        // Deletes a single document (file or subfolder) off disk, after confirming with the user
+        // that it can't be undone - this is a permanent delete, not a move to the Recycle Bin.
+        // Backs both the Delete button next to "Add File..." and the Delete key on the Documents
+        // list (see BuildSectionView.xaml/.xaml.cs). The list itself refreshes off the
+        // FileSystemWatcher already pointed at the folder, but RefreshDocumentsList is also
+        // called directly here so the entry disappears immediately rather than waiting on that
+        // round trip.
+        private void DeleteDocument(DocumentEntry entry)
+        {
+            string kind = entry.IsDirectory ? "folder" : "file";
+            var result = MessageBox.Show(
+                $"Delete the {kind} \"{entry.Name}\"?\n\nThis can't be undone.",
+                "Delete Document",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                DocumentsService.DeleteEntry(entry.FullPath, entry.IsDirectory);
+                RefreshDocumentsList();
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Couldn't delete {entry.Name}: {ex.Message}";
+            }
+        }
+
         // Called by MainViewModel when this tab is deleted (via Settings) - its documents
         // shouldn't outlive the tab itself. Never called for the 5 permanent tabs, which can't
         // be deleted.
@@ -865,6 +992,7 @@ namespace CommandCenter.ViewModel
         {
             DocumentsService.DeleteFolder(_documentsFolderPath);
             _documentsFolderPath = null;
+            _documentsFamily = null;
         }
     }
 }
