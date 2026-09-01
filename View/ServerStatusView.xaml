@@ -65,7 +65,6 @@
             <TextBlock Text="Server Status" FontSize="16" FontWeight="Bold" VerticalAlignment="Center"/>
             <Button Content="Refresh All" Margin="16,0,0,0" Padding="8,4" Command="{Binding RefreshAllCommand}"/>
             <Button Content="Add New Server" Margin="8,0,0,0" Padding="8,4" Command="{Binding AddServerCommand}"/>
-            <Button Content="Close" Margin="8,0,0,0" Padding="8,4" Command="{Binding CloseCommand}"/>
         </StackPanel>
 
         <!-- Legend: lets a new user tell at a glance which icon means a server is up vs. down. -->

@@ -15,7 +15,7 @@ namespace CommandCenter.ViewModel
         private readonly AppSettings _appSettings;
         private readonly SettingsService _settingsService;
 
-        public ServerStatusViewModel(AppSettings appSettings, SettingsService settingsService, Action closeAction)
+        public ServerStatusViewModel(AppSettings appSettings, SettingsService settingsService)
         {
             _appSettings = appSettings;
             _settingsService = settingsService;
@@ -39,7 +39,6 @@ namespace CommandCenter.ViewModel
             }
 
             RefreshAllCommand = new AsyncRelayCommand(_ => Task.WhenAll(Groups.Select(g => g.RefreshAsync())));
-            CloseCommand = new RelayCommand(_ => closeAction());
             AddServerCommand = new RelayCommand(_ => AddServer());
             RenameServerCommand = new RelayCommand(RenameServer);
             DeleteServerCommand = new RelayCommand(DeleteServer);
@@ -58,7 +57,6 @@ namespace CommandCenter.ViewModel
         public ObservableCollection<ServerGroupViewModel> Groups { get; }
 
         public AsyncRelayCommand RefreshAllCommand { get; }
-        public RelayCommand CloseCommand { get; }
         public RelayCommand AddServerCommand { get; }
         public RelayCommand RenameServerCommand { get; }
         public RelayCommand DeleteServerCommand { get; }

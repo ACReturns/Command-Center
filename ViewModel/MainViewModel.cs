@@ -50,12 +50,7 @@ namespace CommandCenter.ViewModel
             _appSettings = _settingsService.Load();
 
             Settings = new SettingsViewModel(_appSettings, _settingsService, OnSettingsTabsCommitted);
-
-            // "Go back to a build tab" - used by Server Status' Close action. Falls back to any
-            // visible tab in the (extremely unlikely) case no BuildSection tab is currently visible.
-            ServerStatus = new ServerStatusViewModel(_appSettings, _settingsService, () =>
-                SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible && t.Settings.Kind == TabKind.BuildSection)
-                    ?? Tabs.FirstOrDefault(t => t.IsVisible));
+            ServerStatus = new ServerStatusViewModel(_appSettings, _settingsService);
 
             foreach (var tabSettings in _appSettings.Tabs.OrderBy(t => t.Order))
             {
