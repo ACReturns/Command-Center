@@ -136,6 +136,67 @@
                                                         Command="{Binding AddCustomServerCommand}"/>
                                             </StackPanel>
                                         </Expander>
+
+                                        <!-- Available Executables: every .exe found sitting in this tab's build folder
+                                             (see Helpers.ExecutableScanner/DraftTabViewModel.RescanExecutables), checked
+                                             ones feeding this tab's Select Executable dropdown (BuildSectionViewModel.
+                                             ExecutableOptions). Replaces the old fixed MapleStory.exe/MapleStoryA.exe-only
+                                             list - there's no Add/Edit/Remove here since nothing is typed in by hand,
+                                             only discovered, so the checkbox is the only control. Re-scanned every time
+                                             Browse... picks a folder, and again whenever Settings is reopened, so this
+                                             always reflects what's actually on disk right now. -->
+                                        <Expander IsExpanded="{Binding IsExecutablesExpanded, Mode=TwoWay}" Margin="0,8,0,0">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Available Executables" FontWeight="SemiBold"/>
+                                                    <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
+                                                        <Run Text="("/>
+                                                        <Run Text="{Binding Executables.Count, Mode=OneWay}"/>
+                                                        <Run Text=")"/>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Expander.Header>
+
+                                            <StackPanel Margin="0,8,0,0">
+                                                <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6"
+                                                           Visibility="{Binding HasBuildPath, Converter={StaticResource BoolToVis}}">
+                                                    <Run Text="Every .exe found in this tab's build folder is listed below. Check the ones you want"/>
+                                                    <Run Text=" to be able to pick from the Select Executable dropdown."/>
+                                                </TextBlock>
+                                                <TextBlock Text="Select a build folder above to scan it for executables."
+                                                           TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6"
+                                                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+                                                <TextBlock Text="No .exe files were found directly in this folder."
+                                                           TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <MultiDataTrigger>
+                                                                    <MultiDataTrigger.Conditions>
+                                                                        <Condition Binding="{Binding HasBuildPath}" Value="True"/>
+                                                                        <Condition Binding="{Binding Executables.Count}" Value="0"/>
+                                                                    </MultiDataTrigger.Conditions>
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </MultiDataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <ItemsControl ItemsSource="{Binding Executables}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
+                                                                <CheckBox Content="{Binding FileName, Mode=OneWay}"
+                                                                          IsChecked="{Binding IsEnabled}"
+                                                                          ToolTip="Available in this tab's Select Executable dropdown"/>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Expander>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

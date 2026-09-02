@@ -20,12 +20,14 @@ namespace CommandCenter.Model
         private string _buildPath = string.Empty;
         private string _versionNumber = string.Empty;
         private List<TabServerEntry>? _servers = null;
+        private List<TabExecutableEntry> _executables = new();
 
         public Guid Id { get; set; } = Guid.NewGuid();
         public TabKind Kind { get; set; }
 
-        // Meaningful only when Kind == BuildSection: which fixed server catalog/executable set
-        // (and, for Live, Pushed to Live support) this tab gets - see LaunchServerCatalog.
+        // Meaningful only when Kind == BuildSection: which fixed server catalog (and, for Live,
+        // Pushed to Live support) this tab gets - see LaunchServerCatalog. Executable options are
+        // no longer tied to Category; every tab discovers its own from BuildPath - see Executables.
         public SectionCategory Category { get; set; }
 
         // GMS/CMS/Live/Server Status/Settings - always exist, never deletable, but still
@@ -78,6 +80,19 @@ namespace CommandCenter.Model
         {
             get => _servers;
             set { if (_servers != value) { _servers = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only - every .exe DraftTabViewModel.RescanExecutables has found sitting
+        // in BuildPath, enabled/disabled via Settings' "Available Executables" checkboxes (see
+        // TabExecutableEntry). Replaces the old fixed LaunchServerCatalog.Executables list - unlike
+        // Servers there's no legacy migration needed here (this field never existed with different
+        // data before), so it just defaults to an empty list; the first time Settings is opened on
+        // a tab with a BuildPath already set, RescanExecutables populates it from whatever .exe
+        // files are actually there.
+        public List<TabExecutableEntry> Executables
+        {
+            get => _executables;
+            set { if (_executables != value) { _executables = value; OnPropertyChanged(); } }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

@@ -7,6 +7,11 @@ using CommandCenter.Model;
 using CommandCenter.View;
 using Microsoft.Win32;
 
+// ExecutableScanner (Helpers/ExecutableScanner.cs) lives in the top-level CommandCenter namespace,
+// same as AppPaths/InverseBooleanToVisibilityConverter - not CommandCenter.Helpers - hence this
+// using rather than "using CommandCenter.Helpers;".
+using CommandCenter;
+
 namespace CommandCenter.ViewModel
 {
     // A scratch, editable copy of one tab's settings, used only while the Settings tab is open -
@@ -23,9 +28,11 @@ namespace CommandCenter.ViewModel
         private string _versionNumber;
         private bool _isMarkedForDeletion;
         private bool _isServersExpanded;
+        private bool _isExecutablesExpanded;
 
         private DraftTabViewModel(Guid id, TabKind kind, SectionCategory category, bool isPermanent, bool isNew,
-            string title, bool isVisible, string buildPath, string versionNumber, IEnumerable<TabServerEntry> servers)
+            string title, bool isVisible, string buildPath, string versionNumber, IEnumerable<TabServerEntry> servers,
+            IEnumerable<TabExecutableEntry> executables)
         {
             Id = id;
             Kind = kind;
@@ -55,21 +62,41 @@ namespace CommandCenter.ViewModel
                 draft.Changed += OnServerChanged;
                 Servers.Add(draft);
             }
+
+            // Same collapsed-only-once-populated reasoning as Servers above.
+            var executableList = executables as IReadOnlyCollection<TabExecutableEntry> ?? executables.ToList();
+            _isExecutablesExpanded = executableList.Count == 0;
+
+            foreach (var entry in executableList)
+            {
+                var draft = DraftExecutableViewModel.FromEntry(entry);
+                draft.Changed += OnExecutableChanged;
+                Executables.Add(draft);
+            }
+
+            // Pick up any .exe added to (or removed from) the build folder since this tab's
+            // Executables list was last saved - see RescanExecutables. Runs even for a tab with no
+            // persisted entries yet (a settings.json saved before this feature existed) so an
+            // already-configured BuildPath is reflected the first time Settings is opened after
+            // updating, without the user having to re-Browse to the same folder.
+            RescanExecutables();
         }
 
         public static DraftTabViewModel FromSettings(TabSettings settings) => new(
             settings.Id, settings.Kind, settings.Category, settings.IsPermanent, isNew: false,
             title: settings.Title, isVisible: settings.IsVisible, buildPath: settings.BuildPath, versionNumber: settings.VersionNumber,
-            servers: settings.Servers ?? Enumerable.Empty<TabServerEntry>());
+            servers: settings.Servers ?? Enumerable.Empty<TabServerEntry>(),
+            executables: settings.Executables);
 
         // Always a BuildSection tab - Server Status/Settings are singletons, never created via
         // "+ Add Tab". Starts with no servers - same as any other brand-new General tab (see
         // LaunchServerCatalog.BuiltInEntries) - but "+ Add Custom Server" is available immediately,
-        // which is exactly what a fresh tab previously couldn't offer at all.
+        // which is exactly what a fresh tab previously couldn't offer at all. Starts with no
+        // executables too - there's nothing to scan yet until Browse picks a build folder.
         public static DraftTabViewModel CreateNew(SectionCategory category, string title) => new(
             Guid.NewGuid(), TabKind.BuildSection, category, isPermanent: false, isNew: true,
             title: title, isVisible: true, buildPath: string.Empty, versionNumber: string.Empty,
-            servers: Enumerable.Empty<TabServerEntry>());
+            servers: Enumerable.Empty<TabServerEntry>(), executables: Enumerable.Empty<TabExecutableEntry>());
 
         public Guid Id { get; }
         public TabKind Kind { get; }
@@ -117,8 +144,12 @@ namespace CommandCenter.ViewModel
         public string BuildPath
         {
             get => _buildPath;
-            set { if (SetProperty(ref _buildPath, value)) RaiseChanged(); }
+            set { if (SetProperty(ref _buildPath, value)) { OnPropertyChanged(nameof(HasBuildPath)); RaiseChanged(); } }
         }
+
+        // Whether BuildPath currently points at a real folder - gates the "Available Executables"
+        // list/placeholder text in SettingsView, same reasoning as BuildSectionViewModel.HasBuildPath.
+        public bool HasBuildPath => !string.IsNullOrWhiteSpace(BuildPath) && Directory.Exists(BuildPath);
 
         public string VersionNumber
         {
@@ -146,6 +177,21 @@ namespace CommandCenter.ViewModel
             set => SetProperty(ref _isServersExpanded, value);
         }
 
+        // This tab's own draft executable list - every .exe RescanExecutables has found sitting in
+        // BuildPath, with whatever enabled/disabled state Settings' "Available Executables"
+        // checkboxes have set. See DraftExecutableViewModel and SettingsViewModel.Save, which
+        // commits this into the live TabSettings.Executables. Only meaningful for a BuildSection
+        // tab, same as Servers/BuildPath/VersionNumber above.
+        public ObservableCollection<DraftExecutableViewModel> Executables { get; } = new();
+
+        // Same view-state-only toggle as IsServersExpanded, for the "Available Executables"
+        // Expander.
+        public bool IsExecutablesExpanded
+        {
+            get => _isExecutablesExpanded;
+            set => SetProperty(ref _isExecutablesExpanded, value);
+        }
+
         // Fired on any edit (including delete/restore/move) so SettingsViewModel can flip
         // IsDirty - reordering itself is driven from SettingsViewModel directly (it owns the
         // list), which sets IsDirty on its own rather than through this event.
@@ -155,6 +201,51 @@ namespace CommandCenter.ViewModel
         // A server-level edit (including delete/restore/toggle) bubbles up the same way a
         // tab-level edit does - see RaiseChanged above.
         private void OnServerChanged() => RaiseChanged();
+
+        // An executable's enabled/disabled checkbox being flipped by hand bubbles up the same way -
+        // see DraftExecutableViewModel.Changed for why RescanExecutables itself never triggers this.
+        private void OnExecutableChanged() => RaiseChanged();
+
+        // Reconciles Executables against whatever .exe files ExecutableScanner actually finds in
+        // BuildPath right now: anything already known keeps its IsEnabled exactly as the user left
+        // it; anything newly found is added (enabled by default - see
+        // DraftExecutableViewModel.CreateDiscovered); anything previously known that's no longer in
+        // the folder (moved, deleted, or BuildPath was just changed to somewhere else entirely) is
+        // dropped, since a stale entry for a file that isn't there has nothing to launch. Matching
+        // is by file name, case-insensitively (Windows file names aren't case-sensitive).
+        //
+        // Deliberately doesn't call RaiseChanged - this just mirrors reality on disk, not a setting
+        // the user changed, so reopening Settings (or re-picking the same folder) on an unchanged
+        // build directory never flips on a false "Unsaved changes". Called once from the
+        // constructor and again every time Browse() picks a new folder.
+        private void RescanExecutables()
+        {
+            var found = ExecutableScanner.ScanExecutables(BuildPath);
+            var foundSet = new HashSet<string>(found, StringComparer.OrdinalIgnoreCase);
+
+            for (int i = Executables.Count - 1; i >= 0; i--)
+            {
+                if (!foundSet.Contains(Executables[i].FileName))
+                {
+                    Executables[i].Changed -= OnExecutableChanged;
+                    Executables.RemoveAt(i);
+                }
+            }
+
+            var alreadyKnown = new HashSet<string>(Executables.Select(e => e.FileName), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var fileName in found)
+            {
+                if (alreadyKnown.Contains(fileName))
+                {
+                    continue;
+                }
+
+                var draft = DraftExecutableViewModel.CreateDiscovered(fileName);
+                draft.Changed += OnExecutableChanged;
+                Executables.Add(draft);
+            }
+        }
 
         private void AddCustomServer()
         {
@@ -181,6 +272,7 @@ namespace CommandCenter.ViewModel
             if (dialog.ShowDialog() == true)
             {
                 BuildPath = dialog.FolderName;
+                RescanExecutables();
             }
         }
     }

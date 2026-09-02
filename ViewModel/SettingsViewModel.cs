@@ -188,6 +188,7 @@ namespace CommandCenter.ViewModel
                         live.BuildPath = draft.BuildPath;
                         live.VersionNumber = draft.VersionNumber;
                         live.Servers = CommitServers(draft);
+                        live.Executables = CommitExecutables(draft);
                     }
 
                     newLiveList.Add(live);
@@ -206,7 +207,8 @@ namespace CommandCenter.ViewModel
                         Order = i,
                         BuildPath = draft.BuildPath,
                         VersionNumber = draft.VersionNumber,
-                        Servers = CommitServers(draft)
+                        Servers = CommitServers(draft),
+                        Executables = CommitExecutables(draft)
                     });
                 }
             }
@@ -233,5 +235,11 @@ namespace CommandCenter.ViewModel
         // order the draft has them.
         private static List<TabServerEntry> CommitServers(DraftTabViewModel draft) =>
             draft.Servers.Where(s => !s.IsMarkedForDeletion).Select(s => s.ToEntry()).ToList();
+
+        // No IsMarkedForDeletion here - DraftTabViewModel.RescanExecutables already keeps
+        // draft.Executables trimmed to whatever's actually in the build folder right now, so
+        // everything left in it (enabled or not) is committed as-is.
+        private static List<TabExecutableEntry> CommitExecutables(DraftTabViewModel draft) =>
+            draft.Executables.Select(e => e.ToEntry()).ToList();
     }
 }

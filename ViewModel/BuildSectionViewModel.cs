@@ -25,8 +25,9 @@ namespace CommandCenter.ViewModel
 
     // Drives one tab's content (GMS / CMS / Live Service, or any extra tab). The same view is
     // reused for every BuildSection-kind tab; only the wrapped TabSettings instance differs. Every
-    // section launches by picking one of two fixed client executables plus a server from that
-    // tab's own persisted, editable server list (see TabSettings.Servers/ServerOptions below) -
+    // section launches by picking one of this tab's own enabled client executables (discovered from
+    // its build folder - see TabSettings.Executables/ExecutableOptions below) plus a server from
+    // that tab's own persisted, editable server list (see TabSettings.Servers/ServerOptions below) -
     // built-in entries seeded from LaunchServerCatalog plus whatever custom ones were added via
     // Settings.
     public class BuildSectionViewModel : ViewModelBase
@@ -321,8 +322,13 @@ namespace CommandCenter.ViewModel
             _statusClearTimer.Start();
         }
 
-        // Same 2 client executables for every section (GMS / CMS / Live Service).
-        public IReadOnlyList<string> ExecutableOptions => LaunchServerCatalog.Executables;
+        // This tab's own persisted executable list (see TabSettings.Executables), filtered down to
+        // whatever's currently enabled - every .exe DraftTabViewModel.RescanExecutables found
+        // sitting in this tab's build folder, minus whichever ones Settings' "Available
+        // Executables" checkboxes have turned off. Replaces the old fixed, 2-name
+        // LaunchServerCatalog.Executables list. Computed live off _settings.Executables rather than
+        // captured once at construction, same reasoning as ServerOptions - see Settings_PropertyChanged.
+        public IEnumerable<string> ExecutableOptions => _settings.Executables.Where(e => e.IsEnabled).Select(e => e.FileName);
 
         // This tab's own persisted server list (see TabSettings.Servers), filtered down to
         // whatever's currently enabled - built-in and custom entries side by side, in whatever
@@ -412,6 +418,19 @@ namespace CommandCenter.ViewModel
             {
                 Guid previousId = SelectedServerOption.Id;
                 SelectedServerOption = ServerOptions.FirstOrDefault(s => s.Id == previousId) ?? ServerOptions.FirstOrDefault();
+            }
+
+            // Same "Save() rebuilds the whole list from scratch" reasoning as ServerOptions above -
+            // ExecutableOptions is just a filtered projection of _settings.Executables, but the
+            // ComboBox still needs an explicit nudge, and the previous selection (a plain file name,
+            // not an object with an Id) needs to be re-matched by name rather than by reference.
+            OnPropertyChanged(nameof(ExecutableOptions));
+
+            if (SelectedExecutable != null)
+            {
+                string previousExecutable = SelectedExecutable;
+                SelectedExecutable = ExecutableOptions.FirstOrDefault(e => string.Equals(e, previousExecutable, StringComparison.OrdinalIgnoreCase))
+                    ?? ExecutableOptions.FirstOrDefault();
             }
 
             // Covers a build path, version number, or title being set/changed (whether typed

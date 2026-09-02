@@ -106,7 +106,8 @@
                 <Button Content="Push to Live" Width="160" HorizontalAlignment="Left" Padding="8,4" Command="{Binding PushToLiveCommand}"/>
             </StackPanel>
 
-            <!-- Launch panel: fixed executable choice + this section's own fixed server list -->
+            <!-- Launch panel: this tab's own enabled executables (from Settings' "Available
+                 Executables") + this section's own server list -->
             <StackPanel Visibility="{Binding IsLaunchPanelVisible, Converter={StaticResource BoolToVis}}">
                 <TextBlock Foreground="#FFB00000" Margin="0,0,0,8" Visibility="{Binding IsSelectedExecutableMissing, Converter={StaticResource BoolToVis}}">
                     <Run Text="{Binding SelectedExecutable, Mode=OneWay}"/>

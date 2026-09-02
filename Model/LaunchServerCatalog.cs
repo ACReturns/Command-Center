@@ -18,12 +18,6 @@ namespace CommandCenter.Model
     // future re-seed).
     public static class LaunchServerCatalog
     {
-        public static IReadOnlyList<string> Executables { get; } = new List<string>
-        {
-            "MapleStoryA.exe",
-            "MapleStory.exe",
-        };
-
         private sealed record BuiltInSpec(string DisplayName, LaunchMode Mode, string Host, string Port);
 
         // GMS: everything except Test 4 - Test 4 is reserved for Live Service Builds.
