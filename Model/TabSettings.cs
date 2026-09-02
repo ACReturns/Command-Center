@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
@@ -18,6 +19,7 @@ namespace CommandCenter.Model
         private int _order;
         private string _buildPath = string.Empty;
         private string _versionNumber = string.Empty;
+        private List<TabServerEntry>? _servers = null;
 
         public Guid Id { get; set; } = Guid.NewGuid();
         public TabKind Kind { get; set; }
@@ -62,6 +64,20 @@ namespace CommandCenter.Model
         {
             get => _versionNumber;
             set { if (_versionNumber != value) { _versionNumber = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only - every entry offered in this tab's launch dropdown (see
+        // BuildSectionViewModel.ServerOptions), built-in and custom side by side (see
+        // TabServerEntry.Source). null only ever appears in a settings.json saved before this
+        // field existed - SettingsService.MigrateServersIfNeeded backfills it (seeding Gms/Cms/Live
+        // tabs from LaunchServerCatalog's built-in registry) the first time such a file loads, so
+        // by the time anything else reads this it's always a real, possibly-empty list. Kept
+        // nullable rather than defaulting to empty specifically so that migration step can tell
+        // "never migrated" apart from "user removed every server on purpose".
+        public List<TabServerEntry>? Servers
+        {
+            get => _servers;
+            set { if (_servers != value) { _servers = value; OnPropertyChanged(); } }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

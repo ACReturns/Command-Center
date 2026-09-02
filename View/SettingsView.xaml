@@ -62,10 +62,80 @@
                                             <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
                                             <TextBox Text="{Binding BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
                                         </DockPanel>
-                                        <StackPanel Orientation="Horizontal">
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                             <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                             <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
                                         </StackPanel>
+
+                                        <!-- Available Servers: this tab's own launch dropdown - built-in entries (seeded
+                                             from LaunchServerCatalog, connect/disconnect only) and custom ones (added via
+                                             "+ Add Custom Server" below, freely editable/removable) side by side. See
+                                             DraftServerViewModel/TabServerEntry. Collapsed by default once a tab already
+                                             has servers configured (see DraftTabViewModel.IsServersExpanded) - expanding/
+                                             collapsing is just view state, not an unsaved change. -->
+                                        <Expander IsExpanded="{Binding IsServersExpanded, Mode=TwoWay}" Margin="0,0,0,0">
+                                            <Expander.Header>
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="Available Servers" FontWeight="SemiBold"/>
+                                                    <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
+                                                        <Run Text="("/>
+                                                        <Run Text="{Binding Servers.Count, Mode=OneWay}"/>
+                                                        <Run Text=")"/>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Expander.Header>
+
+                                            <StackPanel Margin="0,8,0,0">
+                                                <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6">
+                                                    <Run Text="Shown here is what this tab's Launch dropdown can offer. Connect/disconnect a built-in server with its checkbox;"/>
+                                                    <Run Text=" add your own below for anything not in the built-in list."/>
+                                                </TextBlock>
+
+                                                <ItemsControl ItemsSource="{Binding Servers}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
+                                                            <Grid>
+                                                                <!-- Marked-for-deletion: compact row + Restore (custom servers only) -->
+                                                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
+                                                                    <Button Content="Restore" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding RestoreCommand}"/>
+                                                                    <TextBlock VerticalAlignment="Center">
+                                                                        <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
+                                                                        <Run Text=" will be removed on save" Foreground="#FFB00000"/>
+                                                                    </TextBlock>
+                                                                </DockPanel>
+
+                                                                <!-- Normal row -->
+                                                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
+                                                                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,3,10,0"
+                                                                              IsChecked="{Binding IsEnabled}"
+                                                                              ToolTip="Connected - included in this tab's Launch dropdown"/>
+                                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top"
+                                                                                Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBoolToVis}}">
+                                                                        <Button Content="Edit" Width="50" Padding="0,2" Margin="0,0,4,0" Command="{Binding EditCommand}"/>
+                                                                        <Button Content="Remove" Width="64" Padding="0,2" Background="#FFFDECEA" Command="{Binding DeleteCommand}"/>
+                                                                    </StackPanel>
+                                                                    <StackPanel>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"/>
+                                                                            <!-- Run has no Visibility property (it's not a UIElement) - a separate TextBlock is
+                                                                                 needed so this tag can be hidden for a custom entry. -->
+                                                                            <TextBlock Text=" (Built-in)" Foreground="#FF999999" FontStyle="Italic" Margin="4,0,0,0"
+                                                                                       Visibility="{Binding IsBuiltIn, Converter={StaticResource BoolToVis}}"/>
+                                                                        </StackPanel>
+                                                                        <TextBlock Text="{Binding LaunchArgumentPreview, Mode=OneWay}" FontSize="11" Foreground="#FF888888"/>
+                                                                    </StackPanel>
+                                                                </DockPanel>
+                                                            </Grid>
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <Button Content="+ Add Custom Server" Width="150" Padding="6,4" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                                        Command="{Binding AddCustomServerCommand}"/>
+                                            </StackPanel>
+                                        </Expander>
                                     </StackPanel>
                                 </StackPanel>
                             </StackPanel>

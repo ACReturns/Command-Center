@@ -24,9 +24,11 @@ namespace CommandCenter.ViewModel
     }
 
     // Drives one tab's content (GMS / CMS / Live Service, or any extra tab). The same view is
-    // reused for every BuildSection-kind tab; only the wrapped TabSettings instance and server
-    // catalog differ. Every section launches by picking one of two fixed client executables plus
-    // a server from that section's own fixed catalog (see LaunchServerCatalog).
+    // reused for every BuildSection-kind tab; only the wrapped TabSettings instance differs. Every
+    // section launches by picking one of two fixed client executables plus a server from that
+    // tab's own persisted, editable server list (see TabSettings.Servers/ServerOptions below) -
+    // built-in entries seeded from LaunchServerCatalog plus whatever custom ones were added via
+    // Settings.
     public class BuildSectionViewModel : ViewModelBase
     {
         private readonly SettingsService _settingsService;
@@ -54,7 +56,7 @@ namespace CommandCenter.ViewModel
         private double _progressPercent;
         private string _statusText = string.Empty;
         private string? _selectedExecutable;
-        private LaunchServerOption? _selectedServerOption;
+        private TabServerEntry? _selectedServerOption;
         private CancellationTokenSource? _updateCancellation;
         private DispatcherTimer? _statusClearTimer;
 
@@ -70,12 +72,11 @@ namespace CommandCenter.ViewModel
         private string? _documentsFamily;
         private FileSystemWatcher? _documentsWatcher;
 
-        public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, IReadOnlyList<LaunchServerOption> serverOptions, bool supportsPushedToLive, ObservableCollection<TabInfo>? allTabs = null)
+        public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, bool supportsPushedToLive, ObservableCollection<TabInfo>? allTabs = null)
         {
             _settings = settings;
             _appSettings = appSettings;
             _settingsService = settingsService;
-            ServerOptions = serverOptions;
             SupportsPushedToLive = supportsPushedToLive;
             _allTabs = allTabs;
             _uiDispatcher = Dispatcher.CurrentDispatcher;
@@ -323,8 +324,13 @@ namespace CommandCenter.ViewModel
         // Same 2 client executables for every section (GMS / CMS / Live Service).
         public IReadOnlyList<string> ExecutableOptions => LaunchServerCatalog.Executables;
 
-        // This section's own fixed server catalog (GMS, CMS, and Live each get their own).
-        public IReadOnlyList<LaunchServerOption> ServerOptions { get; }
+        // This tab's own persisted server list (see TabSettings.Servers), filtered down to
+        // whatever's currently enabled - built-in and custom entries side by side, in whatever
+        // order Settings has them in. Computed live off _settings.Servers rather than captured once
+        // at construction, so adding/editing/toggling a server in Settings and saving shows up here
+        // immediately without needing to recreate this tab - see Settings_PropertyChanged.
+        public IEnumerable<TabServerEntry> ServerOptions =>
+            (_settings.Servers ?? Enumerable.Empty<TabServerEntry>()).Where(s => s.IsEnabled);
 
         public string? SelectedExecutable
         {
@@ -338,7 +344,7 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public LaunchServerOption? SelectedServerOption
+        public TabServerEntry? SelectedServerOption
         {
             get => _selectedServerOption;
             set => SetProperty(ref _selectedServerOption, value);
@@ -388,6 +394,25 @@ namespace CommandCenter.ViewModel
             OnPropertyChanged(nameof(HasBuildPath));
             OnPropertyChanged(nameof(IsSelectedExecutableMissing));
             OnPropertyChanged(nameof(DocumentsFolderLabel));
+
+            // Settings' Save() rebuilds this tab's whole Servers list from scratch every time (see
+            // SettingsViewModel.Save/CommitServers) - even a save that never touched the Servers
+            // section produces brand-new TabServerEntry instances, so the ComboBox needs an
+            // explicit nudge, and re-matching the selection below has to go by Id rather than by
+            // reference (the old SelectedServerOption object is never going to be one of the new
+            // instances, even when nothing about it actually changed).
+            OnPropertyChanged(nameof(ServerOptions));
+
+            // Carry the same selection forward by Id if it's still there (built-in, still
+            // enabled - or the very same custom entry, now a new instance with the same Id); fall
+            // back to the first still-enabled option if it was disabled or removed. Without this,
+            // saving Settings for any reason (even just renaming the tab) would silently reset
+            // Launch's server picker back to the top of the list every time.
+            if (SelectedServerOption != null)
+            {
+                Guid previousId = SelectedServerOption.Id;
+                SelectedServerOption = ServerOptions.FirstOrDefault(s => s.Id == previousId) ?? ServerOptions.FirstOrDefault();
+            }
 
             // Covers a build path, version number, or title being set/changed (whether typed
             // directly in Settings and saved, or a version applied from PendingVersion after a

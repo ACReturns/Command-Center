@@ -187,6 +187,7 @@ namespace CommandCenter.ViewModel
                     {
                         live.BuildPath = draft.BuildPath;
                         live.VersionNumber = draft.VersionNumber;
+                        live.Servers = CommitServers(draft);
                     }
 
                     newLiveList.Add(live);
@@ -204,7 +205,8 @@ namespace CommandCenter.ViewModel
                         IsVisible = isVisible,
                         Order = i,
                         BuildPath = draft.BuildPath,
-                        VersionNumber = draft.VersionNumber
+                        VersionNumber = draft.VersionNumber,
+                        Servers = CommitServers(draft)
                     });
                 }
             }
@@ -224,5 +226,12 @@ namespace CommandCenter.ViewModel
 
             _onTabsCommitted();
         }
+
+        // Draft server rows marked for deletion (only ever possible for a Custom entry - see
+        // DraftServerViewModel.CanDelete) are dropped here rather than carried into the live list;
+        // everything else - built-in and custom, enabled or not - is committed as-is, in whatever
+        // order the draft has them.
+        private static List<TabServerEntry> CommitServers(DraftTabViewModel draft) =>
+            draft.Servers.Where(s => !s.IsMarkedForDeletion).Select(s => s.ToEntry()).ToList();
     }
 }

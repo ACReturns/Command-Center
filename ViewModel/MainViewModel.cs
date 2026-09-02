@@ -332,17 +332,19 @@ namespace CommandCenter.ViewModel
             return new TabInfo(settings, content, IconFor(settings));
         }
 
-        // A General-category tab (everything "+ Add Tab" creates now) gets no preset server list
-        // and no "Pushed to Live" option - both are still tied to a real Gms/Cms/Live category,
-        // which a plain extra tab no longer has. Tabs is passed through so the Live section (the
-        // only one that ends up using it - see BuildSectionViewModel's constructor) can offer every
-        // other build-section tab as a "push straight from there" option; it's the same live
-        // ObservableCollection this constructor is still populating, which is fine since
-        // BuildSectionViewModel only reads it lazily (on demand / via CollectionChanged), never at
-        // construction time.
+        // A General-category tab (everything "+ Add Tab" creates now) gets no built-in servers and
+        // no "Pushed to Live" option - both are still tied to a real Gms/Cms/Live category, which a
+        // plain extra tab no longer has. It's not stuck with an empty launch dropdown forever
+        // though - Settings' "+ Add Custom Server" lets any BuildSection tab, General included, add
+        // its own (see TabSettings.Servers/BuildSectionViewModel.ServerOptions). Tabs is passed
+        // through so the Live section (the only one that ends up using it - see
+        // BuildSectionViewModel's constructor) can offer every other build-section tab as a "push
+        // straight from there" option; it's the same live ObservableCollection this constructor is
+        // still populating, which is fine since BuildSectionViewModel only reads it lazily (on
+        // demand / via CollectionChanged), never at construction time.
         private BuildSectionViewModel CreateBuildSectionViewModel(TabSettings settings) =>
             new BuildSectionViewModel(settings, _appSettings, _settingsService,
-                LaunchServerCatalog.ServersFor(settings.Category), supportsPushedToLive: settings.Category == SectionCategory.Live,
+                supportsPushedToLive: settings.Category == SectionCategory.Live,
                 allTabs: Tabs);
 
         // A deleted tab's documents shouldn't outlive it - "we don't want to keep anything from
