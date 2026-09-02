@@ -32,6 +32,7 @@ namespace CommandCenter.Model
                 var settings = JsonSerializer.Deserialize<AppSettings>(json) ?? CreateDefaultSettings();
                 MigrateIfNeeded(settings);
                 MigrateServersIfNeeded(settings);
+                EnsurePermanentLiveSupportsPushedToLive(settings);
                 return settings;
             }
             catch (Exception)
@@ -58,7 +59,7 @@ namespace CommandCenter.Model
             new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Cms, IsPermanent = true, Title = "CMS", Order = 1,
                 Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Cms).ToList() },
             new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Live, IsPermanent = true, Title = "Live Service Builds", Order = 2,
-                Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Live).ToList() },
+                SupportsPushedToLive = true, Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Live).ToList() },
             new TabSettings { Kind = TabKind.ServerStatus, IsPermanent = true, Title = "Server Status", Order = 3 },
             new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 4 },
         };
@@ -78,6 +79,26 @@ namespace CommandCenter.Model
                 {
                     tab.Servers = LaunchServerCatalog.BuiltInEntries(tab.Category).ToList();
                 }
+            }
+        }
+
+        // Before SupportsPushedToLive existed, the permanent Live tab's Pushed to Live support was
+        // derived purely from Category == Live (see MainViewModel.CreateBuildSectionViewModel's old
+        // code). A settings.json saved by that version already has Tabs populated, so
+        // MigrateIfNeeded below is a no-op for it and SupportsPushedToLive just deserializes to its
+        // JSON default (false) on the permanent Live tab - this fixes that up on every load,
+        // unconditionally, rather than trying to version-detect it once. Idempotent and cheap
+        // (single LINQ scan), so it's safe to run on every Load regardless of whether anything
+        // actually needed fixing. Never touches extra tabs - those never had this derived from
+        // Category to begin with (see SettingsViewModel.AddTab), so there's nothing to backfill.
+        private static void EnsurePermanentLiveSupportsPushedToLive(AppSettings settings)
+        {
+            var permanentLive = settings.Tabs.FirstOrDefault(t =>
+                t.IsPermanent && t.Kind == TabKind.BuildSection && t.Category == SectionCategory.Live);
+
+            if (permanentLive != null)
+            {
+                permanentLive.SupportsPushedToLive = true;
             }
         }
 
@@ -109,7 +130,7 @@ namespace CommandCenter.Model
             settings.Tabs.Add(new TabSettings
             {
                 Kind = TabKind.BuildSection, Category = SectionCategory.Live, IsPermanent = true, Title = "Live Service Builds", Order = order++,
-                BuildPath = settings.Live.BuildPath, VersionNumber = settings.Live.VersionNumber
+                SupportsPushedToLive = true, BuildPath = settings.Live.BuildPath, VersionNumber = settings.Live.VersionNumber
             });
 
             foreach (var extra in settings.ExtraSections)

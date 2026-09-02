@@ -19,6 +19,8 @@ namespace CommandCenter.Model
         private int _order;
         private string _buildPath = string.Empty;
         private string _versionNumber = string.Empty;
+        private bool _supportsPushedToLive;
+        private string? _customIconPath;
         private List<TabServerEntry>? _servers = null;
         private List<TabExecutableEntry> _executables = new();
         private string _lastSelectedExecutable = string.Empty;
@@ -67,6 +69,30 @@ namespace CommandCenter.Model
         {
             get => _versionNumber;
             set { if (_versionNumber != value) { _versionNumber = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only, and only ever set for a tab that was NEW when this was toggled -
+        // see DraftTabViewModel.CanTogglePushedToLive. Read once at construction by
+        // MainViewModel.CreateBuildSectionViewModel into BuildSectionViewModel's own (readonly)
+        // SupportsPushedToLive - the permanent Live tab always has this forced true regardless of
+        // what's persisted (see SettingsService), since that one's Pushed to Live support has never
+        // been optional.
+        public bool SupportsPushedToLive
+        {
+            get => _supportsPushedToLive;
+            set { if (_supportsPushedToLive != value) { _supportsPushedToLive = value; OnPropertyChanged(); } }
+        }
+
+        // Absolute path to a user-picked custom tab icon (see Settings' "Change Icon" ->
+        // ChooseIconDialog), or null to fall back to the Kind/Category default - see
+        // TabIconCatalog.IconFor. Always null for the 5 permanent tabs (DraftTabViewModel.
+        // CanCustomizeIcon disables the option for them). The file itself lives under
+        // AppPaths.TabIconsFolder, named after this tab's Id, rather than pointing at wherever the
+        // user originally browsed to - see ChooseIconDialog.TryValidateAndCopy.
+        public string? CustomIconPath
+        {
+            get => _customIconPath;
+            set { if (_customIconPath != value) { _customIconPath = value; OnPropertyChanged(); } }
         }
 
         // BuildSection tabs only - every entry offered in this tab's launch dropdown (see

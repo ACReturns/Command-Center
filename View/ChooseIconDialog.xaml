@@ -1,0 +1,87 @@
+<Window x:Class="CommandCenter.View.ChooseIconDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="Choose Tab Icon" Height="440" Width="460"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStyle="ToolWindow">
+    <!-- Settings -> a non-permanent tab's "Change Icon" button (see DraftTabViewModel.
+         ChooseIconCommand). Pick one of the 4 built-in icons that make sense to reuse - GMS/CMS/
+         Live/the app itself, see Model/TabIconCatalog.Presets - or browse for a custom image.
+         Server Status' and Settings' icons are deliberately NOT offered here: both are always-
+         one-of-a-kind tabs, so an extra tab wearing either icon would look like a second Server
+         Status or Settings sitting in the tray. A custom pick has to be square and at least
+         TabIconCatalog.RequiredCustomIconSize on a side, same as every built-in icon already is,
+         so it never ends up blurrier in the tab strip than its neighbors.
+
+         Every thumbnail below (including the big Preview one) is loaded from code-behind via an
+         explicit pack URI (see ChooseIconDialog.xaml.cs ResolveUri/Select) rather than a bare
+         relative "img/…ico" string in XAML - the two ought to be equivalent, but the explicit form
+         is what's proven to work for the Preview image, so every icon in this dialog now goes
+         through that same one code path rather than trusting XAML's implicit resource resolution
+         a second time. -->
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
+            <Border Width="48" Height="48" BorderBrush="#FFD0D0D0" BorderThickness="1" Margin="0,0,12,0">
+                <Image x:Name="PreviewImage" Width="40" Height="40" Stretch="Uniform"/>
+            </Border>
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Preview" FontWeight="SemiBold"/>
+                <TextBlock x:Name="SelectionText" Text="No icon selected yet" Foreground="#FF888888"
+                           FontSize="11" TextWrapping="Wrap" Width="320"/>
+            </StackPanel>
+        </StackPanel>
+
+        <TextBlock Grid.Row="1" Text="Built-in icons" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <WrapPanel Grid.Row="2" x:Name="PresetsPanel" Margin="0,0,0,16">
+            <Button Tag="img/Maple.ico" Click="Preset_Click" Width="70" Margin="0,0,8,8" Padding="4" BorderThickness="1">
+                <StackPanel>
+                    <Image x:Name="MapleThumb" Width="32" Height="32" Stretch="Uniform"/>
+                    <TextBlock Text="Maple" HorizontalAlignment="Center" FontSize="10" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+            <Button Tag="img/Classic.ico" Click="Preset_Click" Width="70" Margin="0,0,8,8" Padding="4" BorderThickness="1">
+                <StackPanel>
+                    <Image x:Name="ClassicThumb" Width="32" Height="32" Stretch="Uniform"/>
+                    <TextBlock Text="Classic" HorizontalAlignment="Center" FontSize="10" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+            <Button Tag="img/Live.ico" Click="Preset_Click" Width="70" Margin="0,0,8,8" Padding="4" BorderThickness="1">
+                <StackPanel>
+                    <Image x:Name="LiveThumb" Width="32" Height="32" Stretch="Uniform"/>
+                    <TextBlock Text="Live" HorizontalAlignment="Center" FontSize="10" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+            <Button Tag="img/AppIcon.ico" Click="Preset_Click" Width="70" Margin="0,0,8,8" Padding="4" BorderThickness="1">
+                <StackPanel>
+                    <Image x:Name="AppIconThumb" Width="32" Height="32" Stretch="Uniform"/>
+                    <TextBlock Text="App Icon" HorizontalAlignment="Center" FontSize="10" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Button>
+        </WrapPanel>
+
+        <TextBlock Grid.Row="3" Text="Or use your own" FontWeight="SemiBold" Margin="0,0,0,6"/>
+        <StackPanel Grid.Row="4" Margin="0,0,0,16">
+            <Button Content="Browse for image..." Width="150" Padding="6,4" HorizontalAlignment="Left" Click="Browse_Click"/>
+            <TextBlock Text="Must be square and at least 256x256 pixels (.ico, .png, or .jpg)."
+                       Foreground="#FF888888" FontSize="11" Margin="0,6,0,0" TextWrapping="Wrap"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="5" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,4,0,0">
+            <Button x:Name="OkButton" Content="Use This Icon" Width="120" Padding="6,5" Margin="0,0,8,0"
+                    IsDefault="True" Click="Ok_Click"/>
+            <Button Content="Cancel" Width="90" Padding="6,5" IsCancel="True" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

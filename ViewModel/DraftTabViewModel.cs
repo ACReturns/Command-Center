@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Windows;
 using CommandCenter.Model;
 using CommandCenter.View;
 using Microsoft.Win32;
@@ -26,13 +27,14 @@ namespace CommandCenter.ViewModel
         private bool _isVisible;
         private string _buildPath;
         private string _versionNumber;
+        private bool _supportsPushedToLive;
         private bool _isMarkedForDeletion;
         private bool _isServersExpanded;
         private bool _isExecutablesExpanded;
 
         private DraftTabViewModel(Guid id, TabKind kind, SectionCategory category, bool isPermanent, bool isNew,
             string title, bool isVisible, string buildPath, string versionNumber, IEnumerable<TabServerEntry> servers,
-            IEnumerable<TabExecutableEntry> executables)
+            IEnumerable<TabExecutableEntry> executables, bool supportsPushedToLive, string? customIconPath)
         {
             Id = id;
             Kind = kind;
@@ -43,11 +45,15 @@ namespace CommandCenter.ViewModel
             _isVisible = isVisible;
             _buildPath = buildPath;
             _versionNumber = versionNumber;
+            _supportsPushedToLive = supportsPushedToLive;
+            CustomIconPath = customIconPath;
 
             BrowseCommand = new RelayCommand(_ => Browse());
             DeleteCommand = new RelayCommand(_ => { IsMarkedForDeletion = true; RaiseChanged(); }, _ => CanDelete);
             RestoreCommand = new RelayCommand(_ => { IsMarkedForDeletion = false; RaiseChanged(); }, _ => IsMarkedForDeletion);
             AddCustomServerCommand = new RelayCommand(_ => AddCustomServer());
+            ChooseIconCommand = new RelayCommand(_ => ChooseIcon(), _ => CanCustomizeIcon);
+            ResetIconCommand = new RelayCommand(_ => ResetIcon(), _ => CanCustomizeIcon && IsCustomIcon);
 
             // Collapsed by default only once there's something to hide - a tab that already has
             // servers configured (GMS/CMS/Live, or an extra tab someone already set up) doesn't
@@ -86,7 +92,9 @@ namespace CommandCenter.ViewModel
             settings.Id, settings.Kind, settings.Category, settings.IsPermanent, isNew: false,
             title: settings.Title, isVisible: settings.IsVisible, buildPath: settings.BuildPath, versionNumber: settings.VersionNumber,
             servers: settings.Servers ?? Enumerable.Empty<TabServerEntry>(),
-            executables: settings.Executables);
+            executables: settings.Executables,
+            supportsPushedToLive: settings.SupportsPushedToLive,
+            customIconPath: settings.CustomIconPath);
 
         // Always a BuildSection tab - Server Status/Settings are singletons, never created via
         // "+ Add Tab". Starts with no servers - same as any other brand-new General tab (see
@@ -96,7 +104,8 @@ namespace CommandCenter.ViewModel
         public static DraftTabViewModel CreateNew(SectionCategory category, string title) => new(
             Guid.NewGuid(), TabKind.BuildSection, category, isPermanent: false, isNew: true,
             title: title, isVisible: true, buildPath: string.Empty, versionNumber: string.Empty,
-            servers: Enumerable.Empty<TabServerEntry>(), executables: Enumerable.Empty<TabExecutableEntry>());
+            servers: Enumerable.Empty<TabServerEntry>(), executables: Enumerable.Empty<TabExecutableEntry>(),
+            supportsPushedToLive: false, customIconPath: null);
 
         public Guid Id { get; }
         public TabKind Kind { get; }
@@ -157,9 +166,49 @@ namespace CommandCenter.ViewModel
             set { if (SetProperty(ref _versionNumber, value)) RaiseChanged(); }
         }
 
+        // "Enable Pushed to Live" - scoped to brand-new tabs only (IsNew), not every extra, so an
+        // already-saved tab's Pushed to Live availability can never be flipped after the fact
+        // without deleting and recreating it. That's a deliberate simplification: BuildSectionViewModel
+        // only ever reads SupportsPushedToLive once, at construction (see MainViewModel.
+        // CreateBuildSectionViewModel) - a tab that survives a Save keeps the same live
+        // BuildSectionViewModel instance rather than getting a new one, so toggling this on an
+        // existing tab would silently do nothing until the app restarted. Restricting the checkbox
+        // to IsNew sidesteps that entirely, since a brand-new tab always gets a freshly constructed
+        // BuildSectionViewModel the moment it's first saved (MainViewModel.OnSettingsTabsCommitted).
+        public bool CanTogglePushedToLive => IsBuildSection && IsNew;
+
+        public bool SupportsPushedToLive
+        {
+            get => _supportsPushedToLive;
+            set { if (SetProperty(ref _supportsPushedToLive, value)) RaiseChanged(); }
+        }
+
+        // "Change Icon" / "Use Default" - disabled entirely for the 5 permanent tabs, which keep
+        // whatever icon was implemented for them. Every non-permanent tab is always a BuildSection
+        // tab in practice (see CreateNew above), but this is gated on IsPermanent directly - same
+        // reasoning as CanHide - so it stays correct even if that invariant ever changes.
+        public bool CanCustomizeIcon => !IsPermanent;
+
+        public string? CustomIconPath { get; private set; }
+        public bool IsCustomIcon => CustomIconPath != null;
+
+        // What SettingsView actually shows next to "Change Icon" - falls back to this tab's own
+        // Kind/Category default (the same lookup TabInfo.IconSource uses for the live tab strip)
+        // until/unless a custom icon has been picked. See TabIconCatalog.
+        public string IconPreviewSource => CustomIconPath ?? TabIconCatalog.DefaultIconFor(Kind, Category);
+
+        // The text SettingsView shows next to "Change Icon"/"Use Default" - e.g. "App Icon" for a
+        // brand-new tab's default, "Maple" if that preset was explicitly picked, or "Custom image"
+        // for an uploaded one. Making the current selection visible here (rather than a static
+        // "Tab icon" caption) is what tells the user what's already applied without having to open
+        // ChooseIconDialog to check.
+        public string IconPreviewLabel => TabIconCatalog.LabelFor(IconPreviewSource);
+
         public RelayCommand BrowseCommand { get; }
         public RelayCommand DeleteCommand { get; }
         public RelayCommand RestoreCommand { get; }
+        public RelayCommand ChooseIconCommand { get; }
+        public RelayCommand ResetIconCommand { get; }
 
         // This tab's own draft server list - see DraftServerViewModel and SettingsViewModel.Save,
         // which is what actually commits it into the live TabSettings.Servers. Only meaningful for
@@ -257,6 +306,34 @@ namespace CommandCenter.ViewModel
                 Servers.Add(draft);
                 RaiseChanged();
             }
+        }
+
+        // Opens ChooseIconDialog (built-in presets + "Browse for image..." with dimension
+        // validation - see TabIconCatalog.RequiredCustomIconSize). Only reachable while
+        // CanCustomizeIcon, i.e. never for a permanent tab.
+        private void ChooseIcon()
+        {
+            if (!ChooseIconDialog.PromptForIcon(Application.Current?.MainWindow, Id, IconPreviewSource, out string? chosen) || chosen == null)
+            {
+                return;
+            }
+
+            CustomIconPath = chosen;
+            OnPropertyChanged(nameof(CustomIconPath));
+            OnPropertyChanged(nameof(IsCustomIcon));
+            OnPropertyChanged(nameof(IconPreviewSource));
+            OnPropertyChanged(nameof(IconPreviewLabel));
+            RaiseChanged();
+        }
+
+        private void ResetIcon()
+        {
+            CustomIconPath = null;
+            OnPropertyChanged(nameof(CustomIconPath));
+            OnPropertyChanged(nameof(IsCustomIcon));
+            OnPropertyChanged(nameof(IconPreviewSource));
+            OnPropertyChanged(nameof(IconPreviewLabel));
+            RaiseChanged();
         }
 
         private void Browse()

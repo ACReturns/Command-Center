@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Data;
@@ -329,28 +330,35 @@ namespace CommandCenter.ViewModel
                 vm.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
             }
 
-            return new TabInfo(settings, content, IconFor(settings));
+            return new TabInfo(settings, content);
         }
 
-        // A General-category tab (everything "+ Add Tab" creates now) gets no built-in servers and
-        // no "Pushed to Live" option - both are still tied to a real Gms/Cms/Live category, which a
-        // plain extra tab no longer has. It's not stuck with an empty launch dropdown forever
-        // though - Settings' "+ Add Custom Server" lets any BuildSection tab, General included, add
-        // its own (see TabSettings.Servers/BuildSectionViewModel.ServerOptions). Tabs is passed
-        // through so the Live section (the only one that ends up using it - see
-        // BuildSectionViewModel's constructor) can offer every other build-section tab as a "push
-        // straight from there" option; it's the same live ObservableCollection this constructor is
-        // still populating, which is fine since BuildSectionViewModel only reads it lazily (on
-        // demand / via CollectionChanged), never at construction time.
+        // A General-category tab (everything "+ Add Tab" creates now) gets no built-in servers -
+        // still tied to a real Gms/Cms/Live category, which a plain extra tab no longer has. It's
+        // not stuck with an empty launch dropdown forever though - Settings' "+ Add Custom Server"
+        // lets any BuildSection tab, General included, add its own (see TabSettings.Servers/
+        // BuildSectionViewModel.ServerOptions). Tabs is passed through so the Live section (and any
+        // extra tab with SupportsPushedToLive - see below) can offer every other build-section tab
+        // as a "push straight from there" option; it's the same live ObservableCollection this
+        // constructor is still populating, which is fine since BuildSectionViewModel only reads it
+        // lazily (on demand / via CollectionChanged), never at construction time.
+        //
+        // SupportsPushedToLive comes straight from the persisted tab (TabSettings.
+        // SupportsPushedToLive) rather than being derived from Category == Live - the permanent
+        // Live tab always has it forced true (SettingsService), and any other tab only ever has it
+        // true if it was toggled on while brand-new (DraftTabViewModel.CanTogglePushedToLive).
         private BuildSectionViewModel CreateBuildSectionViewModel(TabSettings settings) =>
             new BuildSectionViewModel(settings, _appSettings, _settingsService,
-                supportsPushedToLive: settings.Category == SectionCategory.Live,
+                supportsPushedToLive: settings.SupportsPushedToLive,
                 allTabs: Tabs);
 
         // A deleted tab's documents shouldn't outlive it - "we don't want to keep anything from
         // the extra builds." Never actually reached for the 5 permanent tabs, which can't be
         // marked for deletion in the first place (DraftTabViewModel.DeleteCommand is disabled for
-        // IsPermanent tabs).
+        // IsPermanent tabs). A custom icon (see TabSettings.CustomIconPath) is the same story - if
+        // this tab ever had one, its file under AppPaths.TabIconsFolder has nothing left to serve
+        // once the tab itself is gone, so it's deleted best-effort right alongside the Documents
+        // folder rather than left to accumulate in AppData forever.
         private void TeardownTab(TabInfo tabInfo)
         {
             if (tabInfo.Content is BuildSectionViewModel vm)
@@ -359,21 +367,24 @@ namespace CommandCenter.ViewModel
                 vm.StopWatching();
                 vm.DeleteDocumentsFolder();
             }
-        }
 
-        private static string IconFor(TabSettings settings) => settings.Kind switch
-        {
-            TabKind.ServerStatus => "img/Servers.ico",
-            TabKind.Settings => "img/Settings.ico",
-            TabKind.BuildSection => settings.Category switch
+            string? iconPath = tabInfo.Settings.CustomIconPath;
+            if (!string.IsNullOrWhiteSpace(iconPath))
             {
-                SectionCategory.Gms => "img/Maple.ico",
-                SectionCategory.Cms => "img/Classic.ico",
-                SectionCategory.Live => "img/Live.ico",
-                SectionCategory.General => "img/AppIcon.ico",
-                _ => "img/AppIcon.ico"
-            },
-            _ => "img/AppIcon.ico"
-        };
+                try
+                {
+                    if (File.Exists(iconPath))
+                    {
+                        File.Delete(iconPath);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Best-effort cleanup only - a locked/already-gone file here shouldn't block
+                    // the tab itself from being deleted, same reasoning as
+                    // BuildUpdateService.FlattenKnownWrapperFolders swallowing its own delete.
+                }
+            }
+        }
     }
 }

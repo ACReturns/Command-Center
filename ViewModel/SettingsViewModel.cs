@@ -182,11 +182,13 @@ namespace CommandCenter.ViewModel
                     live.Title = draft.Title;
                     live.IsVisible = isVisible;
                     live.Order = i;
+                    live.CustomIconPath = draft.CustomIconPath;
 
                     if (draft.IsBuildSection)
                     {
                         live.BuildPath = draft.BuildPath;
                         live.VersionNumber = draft.VersionNumber;
+                        live.SupportsPushedToLive = draft.SupportsPushedToLive;
                         live.Servers = CommitServers(draft);
                         live.Executables = CommitExecutables(draft);
                     }
@@ -205,8 +207,10 @@ namespace CommandCenter.ViewModel
                         Title = draft.Title,
                         IsVisible = isVisible,
                         Order = i,
+                        CustomIconPath = draft.CustomIconPath,
                         BuildPath = draft.BuildPath,
                         VersionNumber = draft.VersionNumber,
+                        SupportsPushedToLive = draft.SupportsPushedToLive,
                         Servers = CommitServers(draft),
                         Executables = CommitExecutables(draft)
                     });

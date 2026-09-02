@@ -57,6 +57,23 @@
                                         <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
                                     </DockPanel>
 
+                                    <!-- Tab icon: disabled entirely for the 5 permanent tabs, which keep whatever icon
+                                         was implemented for them (see DraftTabViewModel.CanCustomizeIcon). Preview
+                                         image + label both show the default derived from Kind/Category (e.g. "App
+                                         Icon" for a brand-new tab) until a custom one is picked - see
+                                         ChooseIconDialog/TabIconCatalog. -->
+                                    <DockPanel Margin="0,0,0,10" Visibility="{Binding CanCustomizeIcon, Converter={StaticResource BoolToVis}}">
+                                        <Border DockPanel.Dock="Left" Width="24" Height="24" Margin="0,0,8,0" VerticalAlignment="Center">
+                                            <Image Source="{Binding IconPreviewSource}" Width="20" Height="20"/>
+                                        </Border>
+                                        <Button DockPanel.Dock="Left" Content="Change Icon..." Width="100" Padding="4,2" Margin="0,0,6,0"
+                                                VerticalAlignment="Center" Command="{Binding ChooseIconCommand}"/>
+                                        <Button DockPanel.Dock="Left" Content="Use Default" Width="90" Padding="4,2"
+                                                VerticalAlignment="Center" Command="{Binding ResetIconCommand}"
+                                                Visibility="{Binding IsCustomIcon, Converter={StaticResource BoolToVis}}"/>
+                                        <TextBlock Text="{Binding IconPreviewLabel}" VerticalAlignment="Center" Foreground="#FF888888" Margin="8,0,0,0"/>
+                                    </DockPanel>
+
                                     <StackPanel Visibility="{Binding IsBuildSection, Converter={StaticResource BoolToVis}}">
                                         <DockPanel Margin="0,0,0,6">
                                             <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
@@ -66,6 +83,15 @@
                                             <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                             <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
                                         </StackPanel>
+
+                                        <!-- Only offered while this tab is brand-new (not yet saved) - see
+                                             DraftTabViewModel.CanTogglePushedToLive for why an already-saved tab can't
+                                             flip this after the fact. Once saved, the row disappears; whatever was
+                                             chosen here is locked in for this tab's lifetime. -->
+                                        <CheckBox Content="Enable &quot;Pushed to Live&quot; for this tab" Margin="0,0,0,10"
+                                                  IsChecked="{Binding SupportsPushedToLive}"
+                                                  Visibility="{Binding CanTogglePushedToLive, Converter={StaticResource BoolToVis}}"
+                                                  ToolTip="Lets this tab pull a finished build straight from another tab's Current Build folder instead of only extracting an archive."/>
 
                                         <!-- Available Servers: this tab's own launch dropdown - built-in entries (seeded
                                              from LaunchServerCatalog, connect/disconnect only) and custom ones (added via
