@@ -1,6 +1,6 @@
 # Command-Center
 
-A local build tool for individuals to Update/ Patch and Launch local builds. THe tool also gives the user the ability to access 
+A local build tool for individuals to Update/ Patch and Launch local builds. The tool also gives the user the ability to access 
 internally hosted servers to launch the game on. While I initially focused on ensuring both Development & Live Environments were 
 the only projects the app could see, I ended up branching out to make it more useful and future proof by giving users the ability to 
 create their own tab, set the servers they wish to utilize that are in the app by default and if not then add their own. 
