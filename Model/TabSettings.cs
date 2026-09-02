@@ -21,6 +21,7 @@ namespace CommandCenter.Model
         private string _versionNumber = string.Empty;
         private List<TabServerEntry>? _servers = null;
         private List<TabExecutableEntry> _executables = new();
+        private string _lastSelectedExecutable = string.Empty;
 
         public Guid Id { get; set; } = Guid.NewGuid();
         public TabKind Kind { get; set; }
@@ -93,6 +94,20 @@ namespace CommandCenter.Model
         {
             get => _executables;
             set { if (_executables != value) { _executables = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only - the file name (matched against Executables, case-insensitively)
+        // BuildSectionViewModel had SelectedExecutable set to the last time the user actually picked
+        // one, so the Select Executable dropdown can come back to the same choice the next time the
+        // app starts instead of always resetting to the first enabled entry. Written directly by
+        // BuildSectionViewModel outside of Settings' Save flow (same pattern VersionNumber already
+        // uses for a version applied after a build/patch/push) rather than staged through
+        // DraftTabViewModel - remembering the last launch choice isn't really a "setting" the user
+        // edits, so there's nothing worth surfacing on the Settings screen for it.
+        public string LastSelectedExecutable
+        {
+            get => _lastSelectedExecutable;
+            set { if (_lastSelectedExecutable != value) { _lastSelectedExecutable = value; OnPropertyChanged(); } }
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

@@ -57,6 +57,12 @@ namespace CommandCenter.ViewModel
         private double _progressPercent;
         private string _statusText = string.Empty;
         private string? _selectedExecutable;
+        // True only while Settings_PropertyChanged is re-matching SelectedExecutable after a
+        // Settings save rebuilt _settings.Executables - see SelectedExecutable's setter. Without
+        // this, that internal re-sync would look exactly like a user picking something from the
+        // dropdown and try to persist + save again, re-entrantly, in the middle of
+        // SettingsViewModel.Save() still assigning the rest of _appSettings.Tabs.
+        private bool _isSyncingSelectedExecutable;
         private TabServerEntry? _selectedServerOption;
         private CancellationTokenSource? _updateCancellation;
         private DispatcherTimer? _statusClearTimer;
@@ -117,7 +123,15 @@ namespace CommandCenter.ViewModel
             OpenDocumentsFolderCommand = new RelayCommand(_ => OpenDocumentsFolder(), _ => _documentsFolderPath != null);
             Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
 
-            _selectedExecutable = ExecutableOptions.FirstOrDefault();
+            // Rehydrate whichever executable the user picked last time (see
+            // TabSettings.LastSelectedExecutable), if it's still one of this tab's enabled options -
+            // falls back to the first enabled option for a brand-new tab, or if the remembered one
+            // got disabled/removed since. Assigned to the backing field directly (not the
+            // SelectedExecutable property) so this doesn't itself count as a "user picked this" and
+            // re-save LastSelectedExecutable right back to what it already was.
+            _selectedExecutable = ExecutableOptions.FirstOrDefault(e =>
+                string.Equals(e, _settings.LastSelectedExecutable, StringComparison.OrdinalIgnoreCase))
+                ?? ExecutableOptions.FirstOrDefault();
             _selectedServerOption = ServerOptions.FirstOrDefault();
 
             // PushTargets (every other build-section tab, offered as a "push this tab's build
@@ -346,6 +360,19 @@ namespace CommandCenter.ViewModel
                 if (SetProperty(ref _selectedExecutable, value))
                 {
                     OnPropertyChanged(nameof(IsSelectedExecutableMissing));
+
+                    // Remember this choice for next time (see TabSettings.LastSelectedExecutable) -
+                    // but only for an actual user pick from the dropdown, not
+                    // Settings_PropertyChanged silently re-matching the same selection after a
+                    // Settings save touched _settings.Executables. Persisted immediately, same as
+                    // VersionNumber elsewhere (RunUpdateAsync/PushToLiveAsync), rather than waiting
+                    // on the next Settings save - there's no "Settings" step involved in picking an
+                    // executable at all.
+                    if (!_isSyncingSelectedExecutable && !string.IsNullOrEmpty(value))
+                    {
+                        _settings.LastSelectedExecutable = value;
+                        _settingsService.Save(_appSettings);
+                    }
                 }
             }
         }
@@ -428,9 +455,21 @@ namespace CommandCenter.ViewModel
 
             if (SelectedExecutable != null)
             {
-                string previousExecutable = SelectedExecutable;
-                SelectedExecutable = ExecutableOptions.FirstOrDefault(e => string.Equals(e, previousExecutable, StringComparison.OrdinalIgnoreCase))
-                    ?? ExecutableOptions.FirstOrDefault();
+                // Guarded so this internal re-sync (a Settings save touched Executables, not the
+                // user picking a new one) never re-persists LastSelectedExecutable or re-triggers a
+                // settings.json write - see SelectedExecutable's setter and
+                // _isSyncingSelectedExecutable's own comment.
+                _isSyncingSelectedExecutable = true;
+                try
+                {
+                    string previousExecutable = SelectedExecutable;
+                    SelectedExecutable = ExecutableOptions.FirstOrDefault(e => string.Equals(e, previousExecutable, StringComparison.OrdinalIgnoreCase))
+                        ?? ExecutableOptions.FirstOrDefault();
+                }
+                finally
+                {
+                    _isSyncingSelectedExecutable = false;
+                }
             }
 
             // Covers a build path, version number, or title being set/changed (whether typed
