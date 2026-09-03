@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
+using CommandCenter.View;
 using Microsoft.Win32;
 
 namespace CommandCenter.ViewModel
@@ -79,6 +80,11 @@ namespace CommandCenter.ViewModel
         private string? _documentsFamily;
         private FileSystemWatcher? _documentsWatcher;
 
+        // True while the "Enable Debug Command List" checkbox is checked - see
+        // DebugCommandListEnabled. Read straight off _settings.DebugCommandListEnabled rather than
+        // cached here (same reasoning as CurrentBuildPath/VersionNumber above); no backing field
+        // needed for the property itself.
+
         public BuildSectionViewModel(TabSettings settings, AppSettings appSettings, SettingsService settingsService, bool supportsPushedToLive, ObservableCollection<TabInfo>? allTabs = null)
         {
             _settings = settings;
@@ -122,6 +128,36 @@ namespace CommandCenter.ViewModel
             // folder is current, per SyncDocumentsFolder), not a specific entry inside it.
             OpenDocumentsFolderCommand = new RelayCommand(_ => OpenDocumentsFolder(), _ => _documentsFolderPath != null);
             Documents.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDocuments));
+
+            // Debug command list: Add/Import always available; Edit/Delete need a row selected in
+            // the ListBox (its SelectedItem is passed through as CommandParameter - see
+            // BuildSectionView.xaml, same wiring the Documents list already uses).
+            AddDebugCommandCommand = new RelayCommand(_ => AddDebugCommand());
+            ImportDebugCommandsCommand = new RelayCommand(_ => ImportDebugCommands());
+            EditDebugCommandCommand = new RelayCommand(param =>
+            {
+                if (param is string command)
+                {
+                    EditDebugCommand(command);
+                }
+            }, param => param is string);
+            DeleteDebugCommandCommand = new RelayCommand(param =>
+            {
+                if (param is string command)
+                {
+                    DeleteDebugCommand(command);
+                }
+            }, param => param is string);
+            DebugCommands.CollectionChanged += (_, _) => OnPropertyChanged(nameof(HasDebugCommands));
+
+            // Rehydrate this tab's saved debug command list (see Services/DebugCommandListService)
+            // regardless of whether the toggle is currently on - the entries live on disk
+            // independently of DebugCommandListEnabled, same as Documents living independently of
+            // which SectionMode is selected.
+            foreach (string command in DebugCommandListService.Load(_settings.Id))
+            {
+                DebugCommands.Add(command);
+            }
 
             // Rehydrate whichever executable the user picked last time (see
             // TabSettings.LastSelectedExecutable), if it's still one of this tab's enabled options -
@@ -403,6 +439,34 @@ namespace CommandCenter.ViewModel
                 : DocumentsService.VersionedFolderName(_settings.VersionNumber))
             : $"{SectionTitle} Documents";
 
+        // The Launch panel's "Enable Debug Command List" checkbox - shows/hides the Add/Edit/
+        // Delete area beneath it (bound straight to this in BuildSectionView.xaml) and gates
+        // whether Launch copies cmd_uidebug.txt into the build folder (see Launch below).
+        // Persisted immediately on every toggle, same direct-write pattern SelectedExecutable
+        // uses for LastSelectedExecutable - there's no "Settings" step involved in this either.
+        public bool DebugCommandListEnabled
+        {
+            get => _settings.DebugCommandListEnabled;
+            set
+            {
+                if (_settings.DebugCommandListEnabled == value)
+                {
+                    return;
+                }
+
+                _settings.DebugCommandListEnabled = value;
+                _settingsService.Save(_appSettings);
+                OnPropertyChanged();
+            }
+        }
+
+        // This tab's saved debug commands, one per line of its cmd_uidebug.txt (see
+        // Services/DebugCommandListService) - loaded once at construction, then kept in sync with
+        // that file by Add/Edit/Delete below (each rewrites the whole file via PersistDebugCommands
+        // so the on-disk copy never drifts from what's shown here).
+        public ObservableCollection<string> DebugCommands { get; } = new();
+        public bool HasDebugCommands => DebugCommands.Count > 0;
+
         public RelayCommand BrowseSourceCommand { get; }
         public AsyncRelayCommand RunUpdateCommand { get; }
         public RelayCommand CancelUpdateCommand { get; }
@@ -413,6 +477,10 @@ namespace CommandCenter.ViewModel
         public RelayCommand OpenDocumentCommand { get; }
         public RelayCommand DeleteDocumentCommand { get; }
         public RelayCommand OpenDocumentsFolderCommand { get; }
+        public RelayCommand AddDebugCommandCommand { get; }
+        public RelayCommand ImportDebugCommandsCommand { get; }
+        public RelayCommand EditDebugCommandCommand { get; }
+        public RelayCommand DeleteDebugCommandCommand { get; }
 
         // Raised right after a build/patch finishes extracting, with this section's build-drive
         // free-space status (or null if it couldn't be checked). MainViewModel subscribes to this
@@ -790,6 +858,15 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
+            // Drop this tab's saved debug command list into the build folder as cmd_uidebug.txt
+            // right before the client executable starts, so it's always this tab's latest saved
+            // copy - only while the toggle is on, and only if there's actually something saved
+            // (see DebugCommandListService.CopyToBuildFolder).
+            if (DebugCommandListEnabled)
+            {
+                DebugCommandListService.CopyToBuildFolder(_settings.Id, CurrentBuildPath);
+            }
+
             try
             {
                 var process = new Process();
@@ -807,6 +884,117 @@ namespace CommandCenter.ViewModel
                 MessageBox.Show(ex.Message, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        // "Add..." in the Launch panel's debug command list area - appends one new command, then
+        // persists the whole list to this tab's cmd_uidebug.txt (see DebugCommandListService).
+        private void AddDebugCommand()
+        {
+            if (AddEditDebugCommandDialog.PromptForCommand("Add Debug Command", string.Empty, out string command))
+            {
+                DebugCommands.Add(command);
+                PersistDebugCommands();
+            }
+        }
+
+        // "Import..." in the Launch panel's debug command list area - lets a user who already has
+        // a debug command list elsewhere (an old cmd_uidebug.txt, a list handed to them by a
+        // teammate, etc.) carry it straight into this tab's saved list instead of retyping every
+        // line through "Add...". Reads the picked file line by line, skips blank lines and any
+        // line that's an exact duplicate of one already saved (so importing the same file twice,
+        // or a file that's a superset of what's already here, doesn't pile up repeats), appends
+        // the rest, then persists once for the whole batch.
+        private void ImportDebugCommands()
+        {
+            var dialog = new OpenFileDialog
+            {
+                Title = $"Import debug commands for {SectionTitle}",
+                Filter = "Text Files (*.txt)|*.txt|All Files (*.*)|*.*",
+                CheckFileExists = true
+            };
+
+            if (dialog.ShowDialog() != true)
+            {
+                return;
+            }
+
+            string[] lines;
+            try
+            {
+                lines = File.ReadAllLines(dialog.FileName);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                StatusText = $"Couldn't import {Path.GetFileName(dialog.FileName)}: {ex.Message}";
+                MessageBox.Show(ex.Message, "Import Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            int imported = 0;
+            foreach (string line in lines)
+            {
+                string command = line.Trim();
+                if (command.Length == 0 || DebugCommands.Contains(command))
+                {
+                    continue;
+                }
+
+                DebugCommands.Add(command);
+                imported++;
+            }
+
+            if (imported == 0)
+            {
+                StatusText = $"Nothing new to import from {Path.GetFileName(dialog.FileName)}.";
+                return;
+            }
+
+            PersistDebugCommands();
+            StatusText = $"Imported {imported} debug command{(imported == 1 ? "" : "s")} from {Path.GetFileName(dialog.FileName)}.";
+        }
+
+        // "Edit..." - existing is the ListBox's SelectedItem, passed through as CommandParameter
+        // (see BuildSectionView.xaml). Replaces that exact list slot rather than removing/re-adding
+        // so the entry's position in the file is preserved.
+        private void EditDebugCommand(string existing)
+        {
+            int index = DebugCommands.IndexOf(existing);
+            if (index < 0)
+            {
+                return;
+            }
+
+            if (AddEditDebugCommandDialog.PromptForCommand("Edit Debug Command", existing, out string command))
+            {
+                DebugCommands[index] = command;
+                PersistDebugCommands();
+            }
+        }
+
+        // "Delete" - same confirm-then-delete pattern as DeleteDocument below, since this is a
+        // permanent removal from the saved list (and, the next time Launch runs, from
+        // cmd_uidebug.txt in the build folder too).
+        private void DeleteDebugCommand(string existing)
+        {
+            var result = MessageBox.Show(
+                $"Delete the debug command \"{existing}\"?\n\nThis can't be undone.",
+                "Delete Debug Command",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Warning,
+                MessageBoxResult.No);
+
+            if (result != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            DebugCommands.Remove(existing);
+            PersistDebugCommands();
+        }
+
+        // Rewrites this tab's whole cmd_uidebug.txt from DebugCommands, in order - called after
+        // every Add/Edit/Delete above so the saved copy under AppPaths.DebugCommandsFileFor never
+        // drifts from what's shown in the Launch panel.
+        private void PersistDebugCommands() => DebugCommandListService.Save(_settings.Id, DebugCommands);
 
         // Recomputes where this section's Documents folder should be (a sibling of
         // CurrentBuildPath, named from VersionNumber's family or SectionTitle - see

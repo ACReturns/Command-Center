@@ -20,6 +20,7 @@ namespace CommandCenter.Model
         private string _buildPath = string.Empty;
         private string _versionNumber = string.Empty;
         private bool _supportsPushedToLive;
+        private bool _debugCommandListEnabled;
         private string? _customIconPath;
         private List<TabServerEntry>? _servers = null;
         private List<TabExecutableEntry> _executables = new();
@@ -81,6 +82,21 @@ namespace CommandCenter.Model
         {
             get => _supportsPushedToLive;
             set { if (_supportsPushedToLive != value) { _supportsPushedToLive = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only - the "Enable Debug Command List" checkbox in the Launch panel
+        // (see BuildSectionView.xaml / BuildSectionViewModel.DebugCommandListEnabled). Written
+        // directly by BuildSectionViewModel, outside of Settings' Save flow, same as
+        // LastSelectedExecutable below - it's a launch-time toggle, not something staged through
+        // DraftTabViewModel. Only controls whether the Launch panel shows the debug command list
+        // editor and whether Launch copies cmd_uidebug.txt into the build folder - the saved
+        // entries themselves live on disk under AppPaths.DebugCommandsFileFor, not here, so
+        // toggling this off and back on never loses anything. See
+        // Services/DebugCommandListService.cs.
+        public bool DebugCommandListEnabled
+        {
+            get => _debugCommandListEnabled;
+            set { if (_debugCommandListEnabled != value) { _debugCommandListEnabled = value; OnPropertyChanged(); } }
         }
 
         // Absolute path to a user-picked custom tab icon (see Settings' "Change Icon" ->

@@ -358,7 +358,9 @@ namespace CommandCenter.ViewModel
         // IsPermanent tabs). A custom icon (see TabSettings.CustomIconPath) is the same story - if
         // this tab ever had one, its file under AppPaths.TabIconsFolder has nothing left to serve
         // once the tab itself is gone, so it's deleted best-effort right alongside the Documents
-        // folder rather than left to accumulate in AppData forever.
+        // folder rather than left to accumulate in AppData forever. Its saved debug command list
+        // (see Services/DebugCommandListService) lives under AppData the same way, keyed by the
+        // same tab Id, so it gets the same best-effort cleanup here.
         private void TeardownTab(TabInfo tabInfo)
         {
             if (tabInfo.Content is BuildSectionViewModel vm)
@@ -367,6 +369,8 @@ namespace CommandCenter.ViewModel
                 vm.StopWatching();
                 vm.DeleteDocumentsFolder();
             }
+
+            DebugCommandListService.DeleteFolder(tabInfo.Settings.Id);
 
             string? iconPath = tabInfo.Settings.CustomIconPath;
             if (!string.IsNullOrWhiteSpace(iconPath))

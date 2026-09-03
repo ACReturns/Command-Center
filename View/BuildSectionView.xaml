@@ -133,6 +133,43 @@
                 </Grid>
 
                 <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Margin="0,12,0,0" Command="{Binding LaunchCommand}"/>
+
+                <!-- Debug command list: toggling this on shows an Add/Edit/Delete editor for this
+                     tab's saved cmd_uidebug.txt (see Services/DebugCommandListService). The
+                     entries themselves are saved under AppData regardless of this checkbox - it
+                     only controls whether this editor is shown and whether Launch Build copies
+                     the file into the build folder (see BuildSectionViewModel.Launch). -->
+                <CheckBox Content="Enable Debug Command List" IsChecked="{Binding DebugCommandListEnabled}" Margin="0,16,0,0"/>
+
+                <StackPanel Visibility="{Binding DebugCommandListEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
+                    <TextBlock Text="Debug Commands" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                    <TextBlock Text="Saved here, then copied into the build folder as cmd_uidebug.txt right before Launch Build runs."
+                               Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                    <Border MinHeight="60" MaxHeight="140" Background="White" BorderBrush="#FFB0B0B0" BorderThickness="1">
+                        <Grid>
+                            <TextBlock Text="No debug commands yet. Use Add below."
+                                       TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
+                                       Visibility="{Binding HasDebugCommands, Converter={StaticResource InverseBoolToVis}}"/>
+                            <ListBox x:Name="DebugCommandsListBox" ItemsSource="{Binding DebugCommands}" BorderThickness="0" MaxHeight="140"
+                                     Visibility="{Binding HasDebugCommands, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </Border>
+
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="Add..." Width="80" Padding="6,3" Command="{Binding AddDebugCommandCommand}"/>
+                        <!-- Carries an existing debug command list (an old cmd_uidebug.txt, or
+                             any plain text file with one command per line) straight into this
+                             tab's saved list instead of retyping every line via Add. -->
+                        <Button Content="Import..." Width="80" Padding="6,3" Margin="8,0,0,0" Command="{Binding ImportDebugCommandsCommand}"/>
+                        <Button Content="Edit..." Width="80" Padding="6,3" Margin="8,0,0,0"
+                                Command="{Binding EditDebugCommandCommand}"
+                                CommandParameter="{Binding SelectedItem, ElementName=DebugCommandsListBox}"/>
+                        <Button Content="Delete" Width="80" Padding="6,3" Margin="8,0,0,0"
+                                Command="{Binding DeleteDebugCommandCommand}"
+                                CommandParameter="{Binding SelectedItem, ElementName=DebugCommandsListBox}"/>
+                    </StackPanel>
+                </StackPanel>
             </StackPanel>
         </Grid>
 
