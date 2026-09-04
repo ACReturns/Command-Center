@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -190,39 +191,170 @@ namespace CommandCenter.Services
             string.Equals(Path.GetFileNameWithoutExtension(archivePath), PartialClientBaseName, StringComparison.OrdinalIgnoreCase) &&
             SupportedExtensions.Contains(Path.GetExtension(archivePath), StringComparer.OrdinalIgnoreCase);
 
+        // Matches a bare PartialFolderNames entry (increment 0), or that same name followed by an
+        // underscore and a run of digits - e.g. "Partial Client_1", "Partial Client_12" - so a build
+        // that ships its partial-client payload split across several numbered folders is recognized
+        // the same as a single unnumbered one. Increment is parsed out so ResolvePartialClientPayloadAsync
+        // below can merge multiple matches back together in the right order.
+        private static bool TryGetPartialFolderIncrement(string folderName, out int increment)
+        {
+            foreach (var baseName in PartialFolderNames)
+            {
+                if (string.Equals(folderName, baseName, StringComparison.OrdinalIgnoreCase))
+                {
+                    increment = 0;
+                    return true;
+                }
+
+                string prefix = baseName + "_";
+                if (folderName.Length > prefix.Length &&
+                    folderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(folderName.AsSpan(prefix.Length), out int parsed))
+                {
+                    increment = parsed;
+                    return true;
+                }
+            }
+
+            increment = 0;
+            return false;
+        }
+
         // Some patch archives wrap the real payload in a nested Partial_Client archive (or ship it as
-        // an already-extracted "Partial"/"Partial Client" folder) sitting alongside unrelated extras
-        // such as a checksums.md5 file. When either is present at the top of the extracted patch,
-        // it - and only it - is the actual patch content: everything else at that level is discarded,
-        // the archive (if that's what was found) is extracted, and the result is flattened the same
-        // way FindContentRoot flattens a New Build archive. This is only reached when the file the
-        // user selected wasn't itself named Partial_Client (see IsPartialClientArchive), so if
-        // neither is present here either, there's nothing to apply - abort rather than silently
-        // patching with whatever else the archive happened to contain.
-        private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+        // one or more already-extracted "Partial"/"Partial Client" folders - possibly numbered, e.g.
+        // "Partial Client_1", "Partial Client_2", when a build's partial-client payload is split
+        // across several drops) sitting alongside unrelated extras such as a checksums.md5 file. When
+        // either is present at the top of the extracted patch, it - and only it - is the actual patch
+        // content: everything else at that level is discarded, the archive (if that's what was found)
+        // is extracted, and the result is flattened the same way FindContentRoot flattens a New Build
+        // archive. This is only reached when the file the user selected wasn't itself named
+        // Partial_Client (see IsPartialClientArchive), so if nothing is found here either, there's
+        // nothing to apply - abort rather than silently patching with whatever else the archive
+        // happened to contain.
+        // A matched Partial/"Partial Client" folder can itself carry a nested archive (most often
+        // seen as a Partial_Client.zip/.7z sitting right next to other loose files inside a numbered
+        // variant like "Partial Client_2") instead of laying its payload out as plain files. Left
+        // alone, that raw archive would just get copied into the build folder unopened. Extract every
+        // archive found directly inside folderPath straight into folderPath itself - using the same
+        // shared entry-extraction the rest of this service already uses - then delete the archive so
+        // it isn't copied in as a stray zip. Extracting in place overlays onto whatever loose files
+        // already sit there (File.Create truncates on a name collision), the same "patching" overlay
+        // semantics used everywhere else in this service - nothing here deletes first.
+        private static async Task ExtractNestedArchivesAsync(string folderPath, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
+        {
+            var nestedArchives = Directory.GetFiles(folderPath)
+                .Where(f => SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var archivePath in nestedArchives)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                string archiveName = Path.GetFileName(archivePath);
+                progress.Report(new UpdateProgress($"Extracting {archiveName}...", 52));
+
+                await ExtractArchiveAsync(archivePath, folderPath, cancellationToken, (done, total) =>
+                {
+                    progress.Report(new UpdateProgress($"Extracting {archiveName} ({done}/{total})...", 52));
+                }).ConfigureAwait(false);
+
+                File.SetAttributes(archivePath, FileAttributes.Normal);
+                File.Delete(archivePath);
+            }
+        }
+
+        private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, IProgress<UpdateProgress> progress, CancellationToken cancellationToken, bool allowGenericWrapperFallback = true)
         {
             string? partialArchivePath = Directory.GetFiles(contentRoot)
                 .FirstOrDefault(f =>
                     string.Equals(Path.GetFileNameWithoutExtension(f), PartialClientBaseName, StringComparison.OrdinalIgnoreCase) &&
                     SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase));
 
-            string? partialFolderPath = partialArchivePath == null
-                ? Directory.GetDirectories(contentRoot)
-                    .FirstOrDefault(d => PartialFolderNames.Contains(Path.GetFileName(d), StringComparer.OrdinalIgnoreCase))
-                : null;
-
-            if (partialArchivePath == null && partialFolderPath == null)
+            // Every top-level folder matching a known base name or one of its numbered variants -
+            // skipped entirely when a Partial_Client archive was already found above, same as before.
+            // Ordered by increment (bare name = 0) so a multi-folder merge below applies them in the
+            // right order.
+            var partialFolderMatches = new List<(string Path, int Increment)>();
+            if (partialArchivePath == null)
             {
-                // Caught by BuildSectionViewModel.RunUpdateAsync's catch (Exception), which sets
-                // StatusText to "Update failed: <message>" and shows it in the error MessageBox too -
-                // same as every other abort condition in this service (missing archive, no build
-                // path, etc.), so this doesn't need its own special-cased handling on the ViewModel side.
-                throw new InvalidOperationException(
-                    $"Couldn't find a {PartialClientBaseName}.zip/.7z file or a Partial/\"Partial Client\" folder in the extracted patch archive. Patch aborted.");
+                foreach (var dir in Directory.GetDirectories(contentRoot))
+                {
+                    if (TryGetPartialFolderIncrement(Path.GetFileName(dir), out int increment))
+                    {
+                        partialFolderMatches.Add((dir, increment));
+                    }
+                }
+
+                partialFolderMatches.Sort((a, b) => a.Increment.CompareTo(b.Increment));
+            }
+
+            List<string> partialFolderPaths = partialFolderMatches.Select(m => m.Path).ToList();
+
+            if (partialArchivePath == null && partialFolderPaths.Count == 0)
+            {
+                // Nothing named Partial_Client here. Two different situations land here, and only
+                // one of them should abort:
+                //  - The common case: this is simply a plain, unwrapped patch (e.g. a bare "Bin"
+                //    folder with nothing else alongside it, or loose files) that was never going to
+                //    have a Partial_Client marker in the first place - there's exactly one sensible
+                //    payload (contentRoot itself) and nothing to disambiguate, so just use it as-is.
+                //    FlattenKnownWrapperFolders still handles AdminClient/Bin once this is copied
+                //    into destinationBuildPath, same as it does for every other patch layout - it
+                //    doesn't need contentRoot to still have a literal "Bin" subfolder, since
+                //    FindContentRoot's own single-wrapper collapse (see above) already flattens a
+                //    bare-Bin-only archive down to Bin's own contents before this method even runs.
+                //  - The genuinely ambiguous case: more than one archive sits at this level and none
+                //    of them is named Partial_Client, so there's no way to tell which (if any) is the
+                //    real payload - only this case aborts.
+                // A single unnamed archive is a third possibility - not ambiguous, just not yet
+                // opened - so it's unwrapped and re-checked one level in first via a recursive call
+                // with allowGenericWrapperFallback:false, so a second unnamed wrapper found there
+                // doesn't chain forever (matching the one-level-deep scope
+                // ExtractNestedArchivesAsync's own nesting handling uses); if that inner level is
+                // itself ambiguous or empty, the same rules above apply to it.
+                var otherArchives = Directory.GetFiles(contentRoot)
+                    .Where(f => SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                    .ToList();
+
+                if (allowGenericWrapperFallback && otherArchives.Count == 1)
+                {
+                    string wrapperArchivePath = otherArchives[0];
+                    string wrapperArchiveName = Path.GetFileName(wrapperArchivePath);
+                    progress.Report(new UpdateProgress($"Extracting {wrapperArchiveName}...", 51));
+
+                    string wrapperExtractDir = Path.Combine(tempDir, "_PatchWrapperExtract_" + Guid.NewGuid().ToString("N"));
+                    Directory.CreateDirectory(wrapperExtractDir);
+
+                    await ExtractArchiveAsync(wrapperArchivePath, wrapperExtractDir, cancellationToken, (done, total) =>
+                    {
+                        double pct = 50 + (done / (double)total) * 4; // nested extraction spans 50-54%
+                        progress.Report(new UpdateProgress($"Extracting {wrapperArchiveName} ({done}/{total})...", pct));
+                    }).ConfigureAwait(false);
+
+                    string wrapperContentRoot = FindContentRoot(wrapperExtractDir);
+                    await ExtractNestedArchivesAsync(wrapperContentRoot, progress, cancellationToken).ConfigureAwait(false);
+
+                    return await ResolvePartialClientPayloadAsync(tempDir, wrapperContentRoot, progress, cancellationToken, allowGenericWrapperFallback: false).ConfigureAwait(false);
+                }
+
+                if (otherArchives.Count > 1)
+                {
+                    // Caught by BuildSectionViewModel.RunUpdateAsync's catch (Exception), which sets
+                    // StatusText to "Update failed: <message>" and shows it in the error MessageBox
+                    // too - same as every other abort condition in this service (missing archive, no
+                    // build path, etc.), so this doesn't need its own special-cased handling on the
+                    // ViewModel side.
+                    throw new InvalidOperationException(
+                        $"Found multiple archives ({string.Join(", ", otherArchives.Select(Path.GetFileName))}) in the extracted patch with no {PartialClientBaseName}.zip/.7z or Partial/\"Partial Client\" folder to identify which one is the payload. Patch aborted.");
+                }
+
+                // Zero archives (or exactly one, already unwrapped above with nothing Partial_Client-
+                // named found one level in either) - a plain, unambiguous patch. Use contentRoot as-is.
+                return contentRoot;
             }
 
             // Discard everything else extracted alongside the payload (checksums.md5, etc.) - only
-            // the Partial_Client archive or folder itself survives.
+            // the Partial_Client archive or matched folder(s) survive.
             foreach (var file in Directory.GetFiles(contentRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -238,7 +370,7 @@ namespace CommandCenter.Services
             foreach (var dir in Directory.GetDirectories(contentRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (dir == partialFolderPath)
+                if (partialFolderPaths.Contains(dir))
                 {
                     continue;
                 }
@@ -246,9 +378,35 @@ namespace CommandCenter.Services
                 Directory.Delete(dir, recursive: true);
             }
 
-            if (partialFolderPath != null)
+            if (partialFolderPaths.Count == 1)
             {
-                return FindContentRoot(partialFolderPath);
+                string singleContentRoot = FindContentRoot(partialFolderPaths[0]);
+                await ExtractNestedArchivesAsync(singleContentRoot, progress, cancellationToken).ConfigureAwait(false);
+                return singleContentRoot;
+            }
+
+            if (partialFolderPaths.Count > 1)
+            {
+                // More than one matching folder (e.g. "Partial Client" plus "Partial Client_1",
+                // "Partial Client_2", ...) - merge all of them into a single combined folder, applied
+                // in increment order via the same move-and-merge helper FlattenKnownWrapperFolders
+                // uses, so a later increment overwrites an earlier one on filename collision. That's
+                // the same "newer wins" reasoning the outer Patch overlay itself already relies on.
+                progress.Report(new UpdateProgress($"Merging {partialFolderPaths.Count} partial-client folders...", 51));
+                string mergedDir = Path.Combine(tempDir, "_PartialClientMerged_" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(mergedDir);
+
+                foreach (var folderPath in partialFolderPaths)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string folderContentRoot = FindContentRoot(folderPath);
+                    // Extract any archive this folder carries in place, before it gets merged in, so
+                    // its contents (not the raw zip/7z itself) are what lands in mergedDir below.
+                    await ExtractNestedArchivesAsync(folderContentRoot, progress, cancellationToken).ConfigureAwait(false);
+                    MoveDirectoryContents(folderContentRoot, mergedDir, cancellationToken);
+                }
+
+                return mergedDir;
             }
 
             progress.Report(new UpdateProgress("Extracting Partial_Client archive...", 51));
@@ -265,7 +423,11 @@ namespace CommandCenter.Services
                 progress.Report(new UpdateProgress($"Extracting Partial_Client archive ({done}/{total})...", pct));
             }).ConfigureAwait(false);
 
-            return FindContentRoot(partialExtractDir);
+            string extractedContentRoot = FindContentRoot(partialExtractDir);
+            // Covers the same case as the folder branches above, just for a Partial_Client.zip/.7z
+            // that unpacks straight into another archive rather than plain files.
+            await ExtractNestedArchivesAsync(extractedContentRoot, progress, cancellationToken).ConfigureAwait(false);
+            return extractedContentRoot;
         }
 
         // Synchronous on purpose: this already runs on the background thread Task.Run started

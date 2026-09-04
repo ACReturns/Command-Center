@@ -158,8 +158,16 @@
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
 
-                                                <Button Content="+ Add Custom Server" Width="150" Padding="6,4" HorizontalAlignment="Left" Margin="0,8,0,0"
-                                                        Command="{Binding AddCustomServerCommand}"/>
+                                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                    <Button Content="+ Add Custom Server" Width="150" Padding="6,4" HorizontalAlignment="Left"
+                                                            Command="{Binding AddCustomServerCommand}"/>
+                                                    <!-- Pulls from LaunchServerCatalog (GMS/CMS/Live) instead of the user having to look
+                                                         up IPs/ports and retype them one at a time - see DraftTabViewModel.
+                                                         ImportBuiltInServersCommand/ImportBuiltInServersDialog. Offered on every tab, not
+                                                         just one whose Category matches, since any catalog can be borrowed from. -->
+                                                    <Button Content="+ Import Built-In Servers" Width="170" Padding="6,4" HorizontalAlignment="Left" Margin="8,0,0,0"
+                                                            Command="{Binding ImportBuiltInServersCommand}"/>
+                                                </StackPanel>
                                             </StackPanel>
                                         </Expander>
 

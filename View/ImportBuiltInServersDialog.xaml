@@ -1,0 +1,67 @@
+<Window x:Class="CommandCenter.View.ImportBuiltInServersDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        mc:Ignorable="d"
+        Title="Import Built-In Servers" Height="480" Width="460"
+        WindowStartupLocation="CenterScreen" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStyle="ToolWindow">
+    <!-- Settings -> a BuildSection tab's "+ Import Built-In Servers" (see DraftTabViewModel.
+         ImportBuiltInServersCommand). Lets any tab - not just one whose own Category happens to
+         match - pull in the known-good GMS/CMS/Live server list from LaunchServerCatalog instead
+         of the user having to look up each IP/port and retype it through "+ Add Custom Server".
+         Imported entries land as freely-editable Custom rows (see DraftTabViewModel.
+         ImportBuiltInServers), not as un-deletable Source.BuiltIn ones - this is a one-time copy
+         into a tab that isn't structurally tied to the category being borrowed from. -->
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" TextWrapping="Wrap" Foreground="#FF666666" Margin="0,0,0,10">
+            <Run Text="Pull servers straight from a known-good catalog instead of typing them in by hand."/>
+        </TextBlock>
+
+        <TextBlock Grid.Row="1" Text="Catalog" Margin="0,0,0,4"/>
+        <ComboBox Grid.Row="2" x:Name="CategoryCombo" Margin="0,0,0,10"
+                  SelectionChanged="CategoryCombo_SelectionChanged">
+            <ComboBoxItem Content="GMS" IsSelected="True"/>
+            <ComboBoxItem Content="CMS"/>
+            <ComboBoxItem Content="Live Service Builds"/>
+        </ComboBox>
+
+        <Border Grid.Row="3" BorderBrush="#FFE0E0E0" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <ItemsControl x:Name="RowsControl" Margin="8">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border BorderBrush="#FFEFEFEF" BorderThickness="0,0,0,1" Padding="0,6">
+                                <StackPanel>
+                                    <CheckBox Content="{Binding DisplayName, Mode=OneWay}"
+                                              IsChecked="{Binding IsSelected}"
+                                              IsEnabled="{Binding CanSelect, Mode=OneWay}"
+                                              FontWeight="SemiBold"/>
+                                    <TextBlock Text="{Binding Preview, Mode=OneWay}" FontSize="11" Foreground="#FF888888" Margin="20,2,0,0"/>
+                                    <TextBlock Text="Already on this tab" FontSize="11" FontStyle="Italic" Foreground="#FF999999" Margin="20,2,0,0"
+                                               Visibility="{Binding AlreadyAddedVisibility, Mode=OneWay}"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="ImportButton" Content="Import Selected" Width="120" Padding="6,5" Margin="0,0,8,0"
+                    IsDefault="True" Click="Import_Click"/>
+            <Button x:Name="CancelButton" Content="Cancel" Width="90" Padding="6,5"
+                    IsCancel="True" Click="Cancel_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

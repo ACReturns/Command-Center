@@ -52,6 +52,7 @@ namespace CommandCenter.ViewModel
             DeleteCommand = new RelayCommand(_ => { IsMarkedForDeletion = true; RaiseChanged(); }, _ => CanDelete);
             RestoreCommand = new RelayCommand(_ => { IsMarkedForDeletion = false; RaiseChanged(); }, _ => IsMarkedForDeletion);
             AddCustomServerCommand = new RelayCommand(_ => AddCustomServer());
+            ImportBuiltInServersCommand = new RelayCommand(_ => ImportBuiltInServers());
             ChooseIconCommand = new RelayCommand(_ => ChooseIcon(), _ => CanCustomizeIcon);
             ResetIconCommand = new RelayCommand(_ => ResetIcon(), _ => CanCustomizeIcon && IsCustomIcon);
 
@@ -217,6 +218,12 @@ namespace CommandCenter.ViewModel
         public ObservableCollection<DraftServerViewModel> Servers { get; } = new();
         public RelayCommand AddCustomServerCommand { get; }
 
+        // "+ Import Built-In Servers" - see ImportBuiltInServers below. Available on every
+        // BuildSection tab, not just one whose own Category has a matching catalog (a General tab
+        // has none of its own - see LaunchServerCatalog.SpecsFor - but can still borrow GMS/CMS/
+        // Live's known-good entries this way).
+        public RelayCommand ImportBuiltInServersCommand { get; }
+
         // Purely a view-state toggle for the "Available Servers" Expander in SettingsView - not
         // persisted, and expanding/collapsing it is not itself an unsaved change (no RaiseChanged
         // here), same reasoning as ServerGroupViewModel.IsExpanded not touching IsDirty anywhere.
@@ -306,6 +313,32 @@ namespace CommandCenter.ViewModel
                 Servers.Add(draft);
                 RaiseChanged();
             }
+        }
+
+        // Opens ImportBuiltInServersDialog against this tab's own current server list (so it can
+        // flag anything already present as "Already on this tab" rather than offering a duplicate),
+        // then appends whatever the user checked. Imported as Source.Custom, not Source.BuiltIn -
+        // these are a one-time copy into a tab that isn't necessarily even the matching category, so
+        // the user should be able to freely rename/edit/remove them afterward the same as anything
+        // typed in through "+ Add Custom Server", rather than being stuck with them the way a real
+        // BuiltIn entry on a GMS/CMS/Live tab is (see DraftServerViewModel.CanDelete).
+        private void ImportBuiltInServers()
+        {
+            var existing = Servers.Where(s => !s.IsMarkedForDeletion).Select(s => s.ToEntry());
+
+            if (!ImportBuiltInServersDialog.PromptForImport(Application.Current?.MainWindow, existing, out var imported))
+            {
+                return;
+            }
+
+            foreach (var entry in imported)
+            {
+                var draft = DraftServerViewModel.CreateCustom(entry.DisplayName, entry.Mode, entry.Host, entry.Port, entry.RawArgument);
+                draft.Changed += OnServerChanged;
+                Servers.Add(draft);
+            }
+
+            RaiseChanged();
         }
 
         // Opens ChooseIconDialog (built-in presets + "Browse for image..." with dimension

@@ -51,6 +51,7 @@ namespace CommandCenter.ViewModel
 
         private SectionMode _selectedMode = SectionMode.Launch;
         private string _sourceArchivePath = string.Empty;
+        private bool _hasAdditionalArchives;
         private string _pendingVersion = string.Empty;
         private string _pushSourceFolderPath = string.Empty;
         private PushTargetOption? _selectedPushTarget;
@@ -97,6 +98,9 @@ namespace CommandCenter.ViewModel
             _settings.PropertyChanged += Settings_PropertyChanged;
 
             BrowseSourceCommand = new RelayCommand(_ => BrowseSource());
+            // "Add Another File..." under New Build's additional-archives list - always available
+            // (no CanExecute restriction), same as AddDebugCommandCommand.
+            AddAdditionalArchiveCommand = new RelayCommand(_ => AddAdditionalArchive());
             RunUpdateCommand = new AsyncRelayCommand(_ => RunUpdateAsync(), _ => !IsBusy && !string.IsNullOrWhiteSpace(SourceArchivePath) && HasBuildPath);
             CancelUpdateCommand = new RelayCommand(_ => _updateCancellation?.Cancel(), _ => IsBusy && _updateCancellation != null);
             LaunchCommand = new RelayCommand(_ => Launch(), _ => !IsBusy && HasBuildPath && SelectedExecutable != null && SelectedServerOption != null);
@@ -209,6 +213,11 @@ namespace CommandCenter.ViewModel
                     OnPropertyChanged(nameof(IsPushedToLivePanelVisible));
                     OnPropertyChanged(nameof(IsLaunchPanelVisible));
                     OnPropertyChanged(nameof(RunButtonLabel));
+                    // The additional-archives list is New Build-only - switching to Patch (or
+                    // anything else) needs to hide it even though HasAdditionalArchives itself
+                    // doesn't change, since both panels share this same StackPanel in
+                    // BuildSectionView.xaml.
+                    OnPropertyChanged(nameof(IsAdditionalArchivesPanelVisible));
                 }
             }
         }
@@ -253,6 +262,51 @@ namespace CommandCenter.ViewModel
             get => _sourceArchivePath;
             set => SetProperty(ref _sourceArchivePath, value);
         }
+
+        // New Build only (see its Visibility binding in BuildSectionView.xaml) - some builds ship
+        // as a base archive plus one or more patch archives that need applying right after, which
+        // used to mean running New Build, then manually switching to Patch and re-running once per
+        // extra file. Checking this reveals AdditionalArchives below; RunUpdateAsync applies the
+        // base file with UpdateMode.NewBuild same as always, then walks AdditionalArchives in order
+        // with UpdateMode.Patch - the same overlay-not-wipe flow Patch mode already uses - straight
+        // onto the same CurrentBuildPath, one after another, in a single Run.
+        //
+        // Purely transient input state, same as SourceArchivePath itself - never persisted to
+        // TabSettings. Turning this on seeds AdditionalArchives with one blank row immediately (so
+        // there's always something to browse to as soon as the box is checked); turning it off just
+        // hides the list rather than clearing it, so a row already browsed to survives an accidental
+        // uncheck/recheck.
+        public bool HasAdditionalArchives
+        {
+            get => _hasAdditionalArchives;
+            set
+            {
+                if (!SetProperty(ref _hasAdditionalArchives, value))
+                {
+                    return;
+                }
+
+                OnPropertyChanged(nameof(IsAdditionalArchivesPanelVisible));
+
+                if (value && AdditionalArchives.Count == 0)
+                {
+                    AddAdditionalArchive();
+                }
+            }
+        }
+
+        // Every additional file, in the order they'll be applied - see HasAdditionalArchives above
+        // and AddAdditionalArchive/RemoveAdditionalArchive below. A row with a blank Path (added but
+        // never browsed) is skipped rather than treated as an error when Run actually executes - see
+        // RunUpdateAsync.
+        public ObservableCollection<AdditionalArchivePathViewModel> AdditionalArchives { get; } = new();
+
+        // What BuildSectionView.xaml actually binds the additional-archives list's Visibility to -
+        // HasAdditionalArchives alone isn't enough, since New Build and Patch share the same
+        // StackPanel and this list only ever makes sense for New Build. Without this, checking the
+        // box, then switching to Patch (which hides the checkbox but doesn't reset the flag behind
+        // it) would leave the list showing on the Patch panel too.
+        public bool IsAdditionalArchivesPanelVisible => IsNewBuild && HasAdditionalArchives;
 
         public string PendingVersion
         {
@@ -468,6 +522,7 @@ namespace CommandCenter.ViewModel
         public bool HasDebugCommands => DebugCommands.Count > 0;
 
         public RelayCommand BrowseSourceCommand { get; }
+        public RelayCommand AddAdditionalArchiveCommand { get; }
         public AsyncRelayCommand RunUpdateCommand { get; }
         public RelayCommand CancelUpdateCommand { get; }
         public RelayCommand LaunchCommand { get; }
@@ -562,14 +617,48 @@ namespace CommandCenter.ViewModel
             }
         }
 
+        // "Add Another File..." under New Build's additional-archives list - always appends one
+        // blank row (browsed to afterward via that row's own BrowseCommand), same as
+        // HasAdditionalArchives seeding the very first one when the checkbox is turned on.
+        private void AddAdditionalArchive()
+        {
+            AdditionalArchives.Add(new AdditionalArchivePathViewModel(RemoveAdditionalArchive));
+        }
+
+        // Wired into every row's RemoveCommand at construction (see AddAdditionalArchive) - just
+        // drops that one row. Never touches HasAdditionalArchives itself, so the checkbox stays
+        // checked (with an empty list, and "Add Another File..." still available) even if every row
+        // gets removed - RunUpdateAsync treats an empty AdditionalArchives the same as the checkbox
+        // being off: nothing extra to apply.
+        private void RemoveAdditionalArchive(AdditionalArchivePathViewModel entry)
+        {
+            AdditionalArchives.Remove(entry);
+        }
+
         private async Task RunUpdateAsync()
         {
             var mode = SelectedMode == SectionMode.NewBuild ? UpdateMode.NewBuild : UpdateMode.Patch;
 
+            // Every additional row with something actually browsed to, in the order shown - a row
+            // that was added but never pointed at a file is skipped rather than treated as an
+            // error, since "Add Another File..." always adds one blank. Only meaningful for New
+            // Build - Patch mode has no additional-archives UI at all (see
+            // HasAdditionalArchives's Visibility binding in BuildSectionView.xaml), so this is empty
+            // whenever mode == Patch regardless of what's left over in the list from a previous
+            // New Build run.
+            List<string> additionalPaths = mode == UpdateMode.NewBuild
+                ? AdditionalArchives.Select(a => a.Path).Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
+                : new List<string>();
+
             if (mode == UpdateMode.NewBuild)
             {
+                string confirmMessage = additionalPaths.Count == 0
+                    ? $"This will remove the existing {SectionTitle} build at:\n{CurrentBuildPath}\n\nand replace it entirely. Continue?"
+                    : $"This will remove the existing {SectionTitle} build at:\n{CurrentBuildPath}\n\nreplace it with the base file, then apply " +
+                      $"{additionalPaths.Count} additional file{(additionalPaths.Count == 1 ? "" : "s")} on top of it, in order. Continue?";
+
                 var confirm = MessageBox.Show(
-                    $"This will remove the existing {SectionTitle} build at:\n{CurrentBuildPath}\n\nand replace it entirely. Continue?",
+                    confirmMessage,
                     "Confirm New Build",
                     MessageBoxButton.YesNo,
                     MessageBoxImage.Warning);
@@ -589,15 +678,22 @@ namespace CommandCenter.ViewModel
             // this runs. The token lets the user back out of a long-running one via CancelUpdateCommand.
             _updateCancellation = new CancellationTokenSource();
 
-            var progress = new Progress<UpdateProgress>(p =>
-            {
-                ProgressPercent = p.PercentComplete;
-                StatusText = p.Status;
-            });
+            int totalFiles = 1 + additionalPaths.Count;
 
             try
             {
-                await BuildUpdateService.RunAsync(SourceArchivePath, CurrentBuildPath, mode, progress, _updateCancellation.Token);
+                // The base file always runs with this section's own mode (New Build wipes the
+                // folder first; Patch never does). Every additional file after it always runs as
+                // UpdateMode.Patch, straight onto the same CurrentBuildPath BuildUpdateService just
+                // laid the base file into - the same overlay-not-wipe flow a manually-run Patch
+                // already uses, just chained automatically instead of requiring the user to switch
+                // modes and re-run once per extra file.
+                await RunOneArchiveAsync(SourceArchivePath, mode, fileNumber: 1, totalFiles, _updateCancellation.Token);
+
+                for (int i = 0; i < additionalPaths.Count; i++)
+                {
+                    await RunOneArchiveAsync(additionalPaths[i], UpdateMode.Patch, fileNumber: i + 2, totalFiles, _updateCancellation.Token);
+                }
 
                 if (!string.IsNullOrWhiteSpace(PendingVersion))
                 {
@@ -606,7 +702,9 @@ namespace CommandCenter.ViewModel
                     PendingVersion = string.Empty;
                 }
 
-                StatusText = $"{SectionTitle} updated successfully.";
+                StatusText = totalFiles == 1
+                    ? $"{SectionTitle} updated successfully."
+                    : $"{SectionTitle} updated successfully ({totalFiles} files applied).";
 
                 // Refresh the storage tracker with this section's build drive now that the extraction landed.
                 DiskSpaceStatusChanged?.Invoke(this, DiskSpaceService.CheckDiskSpace(CurrentBuildPath));
@@ -626,6 +724,25 @@ namespace CommandCenter.ViewModel
                 _updateCancellation?.Dispose();
                 _updateCancellation = null;
             }
+        }
+
+        // Runs one archive through BuildUpdateService and maps its own 0-100 progress into this
+        // file's 1/totalFiles slice of the overall bar (fileNumber is 1-based), so a multi-file New
+        // Build shows one continuous progress sweep across every file instead of the bar restarting
+        // at 0 for each one. Status text gets a "File X of Y:" prefix whenever there's more than one
+        // file involved; a plain single-file run (the overwhelmingly common case) is left exactly as
+        // it always reads, with no prefix.
+        private Task RunOneArchiveAsync(string archivePath, UpdateMode mode, int fileNumber, int totalFiles, CancellationToken cancellationToken)
+        {
+            var progress = new Progress<UpdateProgress>(p =>
+            {
+                ProgressPercent = totalFiles == 1
+                    ? p.PercentComplete
+                    : ((fileNumber - 1) + p.PercentComplete / 100.0) / totalFiles * 100.0;
+                StatusText = totalFiles == 1 ? p.Status : $"File {fileNumber} of {totalFiles}: {p.Status}";
+            });
+
+            return BuildUpdateService.RunAsync(archivePath, CurrentBuildPath, mode, progress, cancellationToken);
         }
 
         private void BrowsePushSource()

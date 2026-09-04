@@ -48,6 +48,39 @@
                     <TextBox Text="{Binding SourceArchivePath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
                 </DockPanel>
 
+                <!-- New Build only: some builds ship as a base archive plus one or more patch
+                     archives that need applying right after - this queues all of them up front so
+                     Run applies the base file, then each additional file as a patch straight on top
+                     of it, in order, instead of the user having to run New Build and then manually
+                     switch to Patch and re-run once per extra file (see
+                     BuildSectionViewModel.RunUpdateAsync). -->
+                <CheckBox Content="This build has additional files to apply (base + patches)"
+                          IsChecked="{Binding HasAdditionalArchives}"
+                          Visibility="{Binding IsNewBuild, Converter={StaticResource BoolToVis}}"
+                          Margin="0,0,0,8"/>
+
+                <StackPanel Visibility="{Binding IsAdditionalArchivesPanelVisible, Converter={StaticResource BoolToVis}}" Margin="0,0,0,12">
+                    <ItemsControl ItemsSource="{Binding AdditionalArchives}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button Content="Remove" DockPanel.Dock="Right" Width="70" Padding="4,2" Margin="8,0,0,0"
+                                            Command="{Binding RemoveCommand}"/>
+                                    <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Margin="8,0,0,0"
+                                            Command="{Binding BrowseCommand}"/>
+                                    <TextBox Text="{Binding Path, Mode=OneWay}" IsReadOnly="True" VerticalContentAlignment="Center"/>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Button Content="Add Another File..." Width="140" HorizontalAlignment="Left" Padding="6,3"
+                            Command="{Binding AddAdditionalArchiveCommand}"/>
+
+                    <TextBlock Text="Applied in order, straight on top of the base file above - each one uses the same patching flow Patch mode uses, so nothing after the base file clears the build folder."
+                               Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                </StackPanel>
+
                 <TextBlock Text="Set Version Number To (optional)" FontWeight="SemiBold" Margin="0,0,0,4"/>
                 <TextBox Text="{Binding PendingVersion, UpdateSourceTrigger=PropertyChanged}" Width="200" HorizontalAlignment="Left" Margin="0,0,0,12"/>
 
