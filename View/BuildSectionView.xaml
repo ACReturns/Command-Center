@@ -57,15 +57,14 @@
                     <TextBox Text="{Binding SourceArchivePath, Mode=OneWay}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
                 </DockPanel>
 
-                <!-- New Build only: some builds ship as a base archive plus one or more patch
+                <!-- New Build and Patch: some builds ship as a base archive plus one or more patch
                      archives that need applying right after - this queues all of them up front so
-                     Run applies the base file, then each additional file as a patch straight on top
-                     of it, in order, instead of the user having to run New Build and then manually
-                     switch to Patch and re-run once per extra file (see
-                     BuildSectionViewModel.RunUpdateAsync). -->
+                     Run applies the base file (New Build or Patch, whichever mode is selected above),
+                     then each additional file as a patch straight on top of it, in order, instead of
+                     the user having to run once per file and manually re-browse/re-run for each extra
+                     one (see BuildSectionViewModel.RunUpdateAsync). -->
                 <CheckBox Content="This build has additional files to apply (base + patches)"
                           IsChecked="{Binding HasAdditionalArchives}"
-                          Visibility="{Binding IsNewBuild, Converter={StaticResource BoolToVis}}"
                           Margin="0,0,0,8"/>
 
                 <StackPanel Visibility="{Binding IsAdditionalArchivesPanelVisible, Converter={StaticResource BoolToVis}}" Margin="0,0,0,12">

@@ -227,9 +227,9 @@ namespace CommandCenter.ViewModel
                     OnPropertyChanged(nameof(IsPushedToLivePanelVisible));
                     OnPropertyChanged(nameof(IsLaunchPanelVisible));
                     OnPropertyChanged(nameof(RunButtonLabel));
-                    // The additional-archives list is New Build-only - switching to Patch (or
-                    // anything else) needs to hide it even though HasAdditionalArchives itself
-                    // doesn't change, since both panels share this same StackPanel in
+                    // The additional-archives list is New Build/Patch-only - switching to
+                    // Pushed to Live or Launch needs to hide it even though HasAdditionalArchives
+                    // itself doesn't change, since every mode shares this same StackPanel in
                     // BuildSectionView.xaml.
                     OnPropertyChanged(nameof(IsAdditionalArchivesPanelVisible));
                 }
@@ -277,13 +277,15 @@ namespace CommandCenter.ViewModel
             set => SetProperty(ref _sourceArchivePath, value);
         }
 
-        // New Build only (see its Visibility binding in BuildSectionView.xaml) - some builds ship
-        // as a base archive plus one or more patch archives that need applying right after, which
-        // used to mean running New Build, then manually switching to Patch and re-running once per
-        // extra file. Checking this reveals AdditionalArchives below; RunUpdateAsync applies the
-        // base file with UpdateMode.NewBuild same as always, then walks AdditionalArchives in order
-        // with UpdateMode.Patch - the same overlay-not-wipe flow Patch mode already uses - straight
-        // onto the same CurrentBuildPath, one after another, in a single Run.
+        // Available for both New Build and Patch (see its Visibility binding in
+        // BuildSectionView.xaml) - some builds ship as a base archive plus one or more patch
+        // archives that need applying right after, which used to mean running the base file, then
+        // manually switching modes/re-browsing and re-running once per extra file. Checking this
+        // reveals AdditionalArchives below; RunUpdateAsync applies the base file with this
+        // section's own selected mode (New Build wipes the folder first; Patch never does), then
+        // walks AdditionalArchives in order with UpdateMode.Patch - the same overlay-not-wipe flow
+        // Patch mode already uses - straight onto the same CurrentBuildPath, one after another, in
+        // a single Run.
         //
         // Purely transient input state, same as SourceArchivePath itself - never persisted to
         // TabSettings. Turning this on seeds AdditionalArchives with one blank row immediately (so
@@ -316,11 +318,12 @@ namespace CommandCenter.ViewModel
         public ObservableCollection<AdditionalArchivePathViewModel> AdditionalArchives { get; } = new();
 
         // What BuildSectionView.xaml actually binds the additional-archives list's Visibility to -
-        // HasAdditionalArchives alone isn't enough, since New Build and Patch share the same
-        // StackPanel and this list only ever makes sense for New Build. Without this, checking the
-        // box, then switching to Patch (which hides the checkbox but doesn't reset the flag behind
-        // it) would leave the list showing on the Patch panel too.
-        public bool IsAdditionalArchivesPanelVisible => IsNewBuild && HasAdditionalArchives;
+        // HasAdditionalArchives alone isn't enough, since New Build, Patch, Pushed to Live, and
+        // Launch all share the same StackPanel and this list only ever makes sense while the
+        // New Build/Patch panel itself is showing. Without this, checking the box, then switching
+        // to Pushed to Live or Launch (which hides the checkbox but doesn't reset the flag behind
+        // it) would leave the list showing on those panels too.
+        public bool IsAdditionalArchivesPanelVisible => IsUpdatePanelVisible && HasAdditionalArchives;
 
         public string PendingVersion
         {
@@ -678,14 +681,12 @@ namespace CommandCenter.ViewModel
 
             // Every additional row with something actually browsed to, in the order shown - a row
             // that was added but never pointed at a file is skipped rather than treated as an
-            // error, since "Add Another File..." always adds one blank. Only meaningful for New
-            // Build - Patch mode has no additional-archives UI at all (see
-            // HasAdditionalArchives's Visibility binding in BuildSectionView.xaml), so this is empty
-            // whenever mode == Patch regardless of what's left over in the list from a previous
-            // New Build run.
-            List<string> additionalPaths = mode == UpdateMode.NewBuild
-                ? AdditionalArchives.Select(a => a.Path).Where(p => !string.IsNullOrWhiteSpace(p)).ToList()
-                : new List<string>();
+            // error, since "Add Another File..." always adds one blank. Available for both New
+            // Build and Patch (see HasAdditionalArchives's Visibility binding in
+            // BuildSectionView.xaml) - each additional file always runs as UpdateMode.Patch
+            // regardless of the base file's own mode, so this list means the same thing either way.
+            List<string> additionalPaths =
+                AdditionalArchives.Select(a => a.Path).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
 
             if (mode == UpdateMode.NewBuild)
             {
