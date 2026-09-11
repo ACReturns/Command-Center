@@ -24,6 +24,15 @@
                            TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentBuildPath}" MaxWidth="340"/>
                 <TextBlock Text="Version:" FontWeight="Bold" VerticalAlignment="Center"/>
                 <TextBlock Text="{Binding VersionNumber, Mode=OneWay}" Margin="6,0,0,0" VerticalAlignment="Center"/>
+
+                <!-- Mirrors the same note shown in Settings next to this tab's Version Number field
+                     (see BuildSectionViewModel.LastVersionPushedToLiveDisplay/
+                     HasLastVersionPushedToLive) - only shown once Version above has actually gone
+                     back to "Not set" from a Pushed to Live push, and disappears again the moment a
+                     new Version Number is set (from either here or Settings). -->
+                <TextBlock Text="{Binding LastVersionPushedToLiveDisplay, Mode=OneWay}"
+                           Visibility="{Binding HasLastVersionPushedToLive, Converter={StaticResource BoolToVis}}"
+                           Margin="12,0,0,0" VerticalAlignment="Center" FontStyle="Italic" Foreground="#FF666666"/>
             </StackPanel>
         </Border>
 

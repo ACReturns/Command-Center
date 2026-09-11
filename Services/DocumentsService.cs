@@ -189,26 +189,56 @@ namespace CommandCenter.Services
         // best-effort - if something can't be copied (locked file, permissions), the old folder
         // is simply left in place rather than losing anything, and a fresh folder still gets
         // created at the new location right after this call.
-        public static void RenameFolder(string? oldFolderPath, string newFolderPath)
+        public static void RenameFolder(string? oldFolderPath, string newFolderPath) =>
+            TryRenameFolder(oldFolderPath, newFolderPath, out _);
+
+        // Same copy-then-delete merge as RenameFolder above, but reports whether it actually moved
+        // anything and why not, instead of swallowing every non-move silently. Added 2026-09-11 for
+        // BuildSectionViewModel.PushToLiveAsync's cross-tab Documents merge specifically: a silent
+        // no-op there (a mismatched/missing source path, or a copy that throws partway through) is
+        // exactly the "Live shows the right folder name but it's empty, the source tab keeps the
+        // real files" bug this method exists to make visible - see
+        // pushed_to_live_documents_and_executables_sync.md CORRECTIONS for the history of this
+        // failing silently across multiple "fix" attempts. `error` is null on a genuine success,
+        // including the harmless "already at the destination" case - it's populated (and the method
+        // returns false) for every other case: the source path being null/blank, the source folder
+        // not existing on disk, or the copy/delete throwing partway through (locked file,
+        // permissions, path length, disk full, etc.) - RenameFolder's original behavior (leaving the
+        // source folder in place on any of these) is unchanged, only visibility is added.
+        public static bool TryRenameFolder(string? oldFolderPath, string newFolderPath, out string? error)
         {
-            if (string.IsNullOrEmpty(oldFolderPath) || !Directory.Exists(oldFolderPath))
+            if (string.IsNullOrEmpty(oldFolderPath))
             {
-                return;
+                error = "source folder path was null or empty";
+                return false;
+            }
+
+            if (!Directory.Exists(oldFolderPath))
+            {
+                error = $"source folder does not exist on disk: {oldFolderPath}";
+                return false;
             }
 
             if (string.Equals(oldFolderPath, newFolderPath, StringComparison.OrdinalIgnoreCase))
             {
-                return;
+                error = null;
+                return true;
             }
 
             try
             {
                 CopyDirectoryRecursive(oldFolderPath, newFolderPath);
                 Directory.Delete(oldFolderPath, recursive: true);
+                error = null;
+                return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // Best-effort - see summary above.
+                // Best-effort, same as RenameFolder's original catch - the source folder is left in
+                // place rather than losing anything - but now the reason is captured instead of
+                // discarded.
+                error = ex.Message;
+                return false;
             }
         }
 

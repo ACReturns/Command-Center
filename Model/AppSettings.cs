@@ -89,6 +89,13 @@ namespace CommandCenter.Model
         // Server Status tab's per-group expanded/collapsed state - see ServerStatusSettings.
         public ServerStatusSettings ServerStatus { get; set; } = new();
 
+        // User opt-in for the app to relaunch itself elevated (UAC "runas") on the next launch -
+        // see App.xaml.cs's OnStartup override. Defaults to false (asInvoker, the project's
+        // existing default - there's no app.manifest requesting elevation) so a settings.json
+        // saved before this feature existed just deserializes this to false, matching prior
+        // behavior exactly.
+        public bool RunAsAdministrator { get; set; } = false;
+
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
         // resets these to empty immediately after migrating them into Tabs once.

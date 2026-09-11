@@ -155,6 +155,16 @@ namespace CommandCenter.ViewModel
                     }
                 }
 
+                // Switching INTO Settings - re-sync its draft from live first (see
+                // SettingsViewModel.RefreshFromLiveIfClean), so a change written straight onto a
+                // live TabSettings outside the normal Settings save flow (e.g.
+                // BuildSectionViewModel.PushToLiveAsync clearing a push source tab's Version Number)
+                // shows up here too, not just on that tab's own already-live-bound view.
+                if (target != null && ReferenceEquals(target.Content, Settings))
+                {
+                    Settings.RefreshFromLiveIfClean();
+                }
+
                 _selectedTab = target;
                 OnPropertyChanged(nameof(SelectedTab));
             }

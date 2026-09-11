@@ -27,13 +27,15 @@ namespace CommandCenter.ViewModel
         private bool _isVisible;
         private string _buildPath;
         private string _versionNumber;
+        private string? _lastVersionPushedToLive;
         private bool _supportsPushedToLive;
         private bool _isMarkedForDeletion;
         private bool _isServersExpanded;
         private bool _isExecutablesExpanded;
 
         private DraftTabViewModel(Guid id, TabKind kind, SectionCategory category, bool isPermanent, bool isNew,
-            string title, bool isVisible, string buildPath, string versionNumber, IEnumerable<TabServerEntry> servers,
+            string title, bool isVisible, string buildPath, string versionNumber, string? lastVersionPushedToLive,
+            IEnumerable<TabServerEntry> servers,
             IEnumerable<TabExecutableEntry> executables, bool supportsPushedToLive, string? customIconPath)
         {
             Id = id;
@@ -45,6 +47,7 @@ namespace CommandCenter.ViewModel
             _isVisible = isVisible;
             _buildPath = buildPath;
             _versionNumber = versionNumber;
+            _lastVersionPushedToLive = lastVersionPushedToLive;
             _supportsPushedToLive = supportsPushedToLive;
             CustomIconPath = customIconPath;
 
@@ -92,6 +95,7 @@ namespace CommandCenter.ViewModel
         public static DraftTabViewModel FromSettings(TabSettings settings) => new(
             settings.Id, settings.Kind, settings.Category, settings.IsPermanent, isNew: false,
             title: settings.Title, isVisible: settings.IsVisible, buildPath: settings.BuildPath, versionNumber: settings.VersionNumber,
+            lastVersionPushedToLive: settings.LastVersionPushedToLive,
             servers: settings.Servers ?? Enumerable.Empty<TabServerEntry>(),
             executables: settings.Executables,
             supportsPushedToLive: settings.SupportsPushedToLive,
@@ -105,6 +109,7 @@ namespace CommandCenter.ViewModel
         public static DraftTabViewModel CreateNew(SectionCategory category, string title) => new(
             Guid.NewGuid(), TabKind.BuildSection, category, isPermanent: false, isNew: true,
             title: title, isVisible: true, buildPath: string.Empty, versionNumber: string.Empty,
+            lastVersionPushedToLive: null,
             servers: Enumerable.Empty<TabServerEntry>(), executables: Enumerable.Empty<TabExecutableEntry>(),
             supportsPushedToLive: false, customIconPath: null);
 
@@ -164,8 +169,46 @@ namespace CommandCenter.ViewModel
         public string VersionNumber
         {
             get => _versionNumber;
-            set { if (SetProperty(ref _versionNumber, value)) RaiseChanged(); }
+            set
+            {
+                if (SetProperty(ref _versionNumber, value))
+                {
+                    // Mirrors TabSettings.VersionNumber's own auto-clear (see there for the full
+                    // reasoning) so the "Last version pushed to Live" note disappears the moment the
+                    // user types a new version in here, not just after Save commits it to live.
+                    if (!string.IsNullOrWhiteSpace(value) && !string.IsNullOrEmpty(_lastVersionPushedToLive))
+                    {
+                        LastVersionPushedToLive = null;
+                    }
+
+                    RaiseChanged();
+                }
+            }
         }
+
+        // The version this tab's build was last pushed to Live under (see
+        // TabSettings.LastVersionPushedToLive / BuildSectionViewModel.PushToLiveAsync), or null if
+        // it's never been a push source or has since been given a new Version Number. Settable so
+        // Save() can be a plain field copy back onto the live TabSettings like every other field
+        // here, even though nothing in Settings itself lets the user edit it directly.
+        public string? LastVersionPushedToLive
+        {
+            get => _lastVersionPushedToLive;
+            set
+            {
+                if (SetProperty(ref _lastVersionPushedToLive, value))
+                {
+                    OnPropertyChanged(nameof(HasLastVersionPushedToLive));
+                    OnPropertyChanged(nameof(LastVersionPushedToLiveDisplay));
+                }
+            }
+        }
+
+        // Drives the "Last version pushed to Live: ..." note's Visibility next to the Version
+        // Number field in SettingsView - only meaningful (and only ever true) for a BuildSection tab.
+        public bool HasLastVersionPushedToLive => !string.IsNullOrEmpty(LastVersionPushedToLive);
+
+        public string LastVersionPushedToLiveDisplay => $"Last version pushed to Live: {LastVersionPushedToLive}";
 
         // "Enable Pushed to Live" - scoped to brand-new tabs only (IsNew), not every extra, so an
         // already-saved tab's Pushed to Live availability can never be flipped after the fact

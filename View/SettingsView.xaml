@@ -82,6 +82,15 @@
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                                             <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                             <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+
+                                            <!-- Only shown once this tab has actually been a Pushed to Live source (see
+                                                 TabSettings.LastVersionPushedToLive / BuildSectionViewModel.PushToLiveAsync) and
+                                                 disappears again the moment a new Version Number is typed above (see
+                                                 DraftTabViewModel.VersionNumber's auto-clear) - purely informational, nothing here
+                                                 is editable. -->
+                                            <TextBlock Text="{Binding LastVersionPushedToLiveDisplay}"
+                                                       Visibility="{Binding HasLastVersionPushedToLive, Converter={StaticResource BoolToVis}}"
+                                                       VerticalAlignment="Center" Margin="12,0,0,0" FontStyle="Italic" Foreground="#FF666666"/>
                                         </StackPanel>
 
                                         <!-- Only offered while this tab is brand-new (not yet saved) - see
@@ -245,6 +254,21 @@
                  in (see SettingsViewModel.AddTab). -->
             <Button Content="+ Add Tab" Width="120" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12"
                     Command="{Binding AddTabCommand}"/>
+
+            <!-- App-level (not per-tab) setting - see SettingsViewModel.RunAsAdministrator /
+                 App.xaml.cs's OnStartup override. Only takes effect on the next launch, since the
+                 current process is already running at whatever level it started at. -->
+            <Border Style="{StaticResource SectionCard}">
+                <StackPanel>
+                    <TextBlock Text="Application" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+                    <CheckBox Content="Run Command Center as Administrator" Margin="0,4,0,4"
+                              IsChecked="{Binding RunAsAdministrator}"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11">
+                        <Run Text="When enabled, the app relaunches itself elevated (you'll see a Windows UAC prompt) the next time it starts."/>
+                        <Run Text=" Takes effect on next launch, not the current session. Remember to click Save Settings below."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
 
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                 <Button Content="Save Settings" Width="140" Padding="8,4" Command="{Binding SaveCommand}"/>

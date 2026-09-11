@@ -17,9 +17,26 @@ namespace CommandCenter.ViewModel
     {
         private bool _isSelected;
 
-        public PushTargetOption(TabSettings settings)
+        // The actual live BuildSectionViewModel for this candidate tab (tabInfo.Content in
+        // MainViewModel.Tabs), when the caller has one to hand over - null only for a
+        // PushTargetOption constructed without it (there's no other caller today, but this stays
+        // optional rather than required so a future caller isn't forced to have one).
+        //
+        // Added specifically so BuildSectionViewModel.PushToLiveAsync can ask the SOURCE tab's own
+        // ViewModel what it actually thinks its current Documents folder is (SourceViewModel?.
+        // DocumentsFolderPath) instead of only trusting a value recomputed from scratch via
+        // DocumentsService formulas. Recomputing "should" always agree (both read the very same
+        // TabSettings instance - see RebuildPushTargets/CreateBuildSectionViewModel, which both use
+        // the identical TabSettings reference), but this exact area has produced two different real
+        // bugs that "should always agree" reasoning didn't predict - see
+        // pushed_to_live_documents_and_executables_sync.md CORRECTIONS. Going straight to the
+        // source of truth removes that whole class of doubt rather than re-deriving it and hoping.
+        public BuildSectionViewModel? SourceViewModel { get; }
+
+        public PushTargetOption(TabSettings settings, BuildSectionViewModel? sourceViewModel = null)
         {
             Settings = settings;
+            SourceViewModel = sourceViewModel;
             Settings.PropertyChanged += Settings_PropertyChanged;
         }
 

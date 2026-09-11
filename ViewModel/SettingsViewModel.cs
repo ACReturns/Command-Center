@@ -21,6 +21,7 @@ namespace CommandCenter.ViewModel
         private string _statusText = string.Empty;
         private DispatcherTimer? _statusClearTimer;
         private bool _isDirty;
+        private bool _runAsAdministrator;
 
         // onTabsCommitted is called after Save() has already updated _appSettings.Tabs in place
         // and persisted it - MainViewModel uses it to reconcile its live Tabs/TabInfo collection
@@ -49,6 +50,22 @@ namespace CommandCenter.ViewModel
         {
             get => _isDirty;
             private set => SetProperty(ref _isDirty, value);
+        }
+
+        // App-level (not per-tab) opt-in to relaunch elevated on next startup - see AppSettings.
+        // RunAsAdministrator / App.xaml.cs's OnStartup override. Loaded/committed alongside the
+        // tabs in LoadDraftFromLive/Save below; setting it marks the draft dirty just like any
+        // per-tab field does, so leaving Settings with this changed but unsaved still warns first.
+        public bool RunAsAdministrator
+        {
+            get => _runAsAdministrator;
+            set
+            {
+                if (SetProperty(ref _runAsAdministrator, value))
+                {
+                    IsDirty = true;
+                }
+            }
         }
 
         public string StatusText
@@ -149,6 +166,12 @@ namespace CommandCenter.ViewModel
                 DraftTabs.Add(draft);
             }
 
+            // Set the backing field directly (not the RunAsAdministrator property) so this load
+            // doesn't itself flip IsDirty true one line before it's reset below - same reasoning
+            // as every draft's fields being set from FromSettings rather than through a setter.
+            _runAsAdministrator = _appSettings.RunAsAdministrator;
+            OnPropertyChanged(nameof(RunAsAdministrator));
+
             IsDirty = false;
         }
 
@@ -158,6 +181,23 @@ namespace CommandCenter.ViewModel
         // without saving. Live AppSettings.Tabs was never touched, so this is just a fresh clone
         // of it - every unsaved edit, add, delete, and reorder simply disappears.
         public void DiscardChanges() => LoadDraftFromLive();
+
+        // Called by MainViewModel every time the user switches INTO the Settings tab. The draft is
+        // only ever otherwise refreshed at construction or after a Save/discard - so a live-side
+        // change made outside the normal Settings save flow (BuildSectionViewModel writes
+        // VersionNumber/LastSelectedExecutable/LastVersionPushedToLive straight onto the live
+        // TabSettings for New Build/Patch/Pushed to Live - see TabSettings.cs) would otherwise sit
+        // unreflected in an already-open Settings draft until the next Save/discard, even though the
+        // main tab showing that same TabSettings updates immediately. Re-syncing on every visit
+        // closes that gap. No-op while IsDirty, so simply clicking into Settings to peek at
+        // something never discards an in-progress edit on some other tab's row.
+        public void RefreshFromLiveIfClean()
+        {
+            if (!IsDirty)
+            {
+                LoadDraftFromLive();
+            }
+        }
 
         public void Save()
         {
@@ -188,6 +228,7 @@ namespace CommandCenter.ViewModel
                     {
                         live.BuildPath = draft.BuildPath;
                         live.VersionNumber = draft.VersionNumber;
+                        live.LastVersionPushedToLive = draft.LastVersionPushedToLive;
                         live.SupportsPushedToLive = draft.SupportsPushedToLive;
                         live.Servers = CommitServers(draft);
                         live.Executables = CommitExecutables(draft);
@@ -210,6 +251,7 @@ namespace CommandCenter.ViewModel
                         CustomIconPath = draft.CustomIconPath,
                         BuildPath = draft.BuildPath,
                         VersionNumber = draft.VersionNumber,
+                        LastVersionPushedToLive = draft.LastVersionPushedToLive,
                         SupportsPushedToLive = draft.SupportsPushedToLive,
                         Servers = CommitServers(draft),
                         Executables = CommitExecutables(draft)
@@ -218,6 +260,7 @@ namespace CommandCenter.ViewModel
             }
 
             _appSettings.Tabs = newLiveList;
+            _appSettings.RunAsAdministrator = RunAsAdministrator;
             _settingsService.Save(_appSettings);
 
             // Clear IsDirty (via LoadDraftFromLive) BEFORE notifying MainViewModel of the commit.

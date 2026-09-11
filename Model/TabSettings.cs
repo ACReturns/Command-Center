@@ -25,6 +25,7 @@ namespace CommandCenter.Model
         private List<TabServerEntry>? _servers = null;
         private List<TabExecutableEntry> _executables = new();
         private string _lastSelectedExecutable = string.Empty;
+        private string? _lastVersionPushedToLive;
 
         public Guid Id { get; set; } = Guid.NewGuid();
         public TabKind Kind { get; set; }
@@ -69,7 +70,40 @@ namespace CommandCenter.Model
         public string VersionNumber
         {
             get => _versionNumber;
-            set { if (_versionNumber != value) { _versionNumber = value; OnPropertyChanged(); } }
+            set
+            {
+                if (_versionNumber != value)
+                {
+                    _versionNumber = value;
+                    OnPropertyChanged();
+
+                    // A real (non-blank) version number means this tab has moved on to a new build -
+                    // whatever it was last pushed to Live under (see LastVersionPushedToLive below)
+                    // no longer describes its current state, so the "Last version pushed to Live"
+                    // note in Settings shouldn't keep showing. Only fires going TO a non-blank value -
+                    // VersionNumber being cleared (e.g. by PushToLiveAsync right before it sets
+                    // LastVersionPushedToLive to what was just cleared) must not immediately wipe the
+                    // value being set alongside it.
+                    if (!string.IsNullOrWhiteSpace(value) && !string.IsNullOrEmpty(_lastVersionPushedToLive))
+                    {
+                        LastVersionPushedToLive = null;
+                    }
+                }
+            }
+        }
+
+        // The version this tab's build was pushed to Live under, the last time it was pushed FROM
+        // this tab specifically - see BuildSectionViewModel.PushToLiveAsync, which sets this
+        // (alongside clearing VersionNumber) when this tab is picked as a Pushed to Live source.
+        // Null/empty means either this tab has never been a push source, or it has since been given
+        // a new Version Number (see the auto-clear above) and the note no longer applies. Purely
+        // informational - shown in Settings next to the Version Number field (DraftTabViewModel.
+        // LastVersionPushedToLive/HasLastVersionPushedToLive) so the user can still tell what used to
+        // be there after the tab's own build folder was emptied out by the push.
+        public string? LastVersionPushedToLive
+        {
+            get => _lastVersionPushedToLive;
+            set { if (_lastVersionPushedToLive != value) { _lastVersionPushedToLive = value; OnPropertyChanged(); } }
         }
 
         // BuildSection tabs only, and only ever set for a tab that was NEW when this was toggled -
