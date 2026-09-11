@@ -336,10 +336,11 @@ namespace CommandCenter.ViewModel
             set => SetProperty(ref _pushSourceFolderPath, value);
         }
 
-        // Every other build-section tab (GMS, CMS, any extra - never Server Status/Settings/this
-        // section itself), offered as a "push straight from there" radio option alongside "Folder
-        // to Push to Live". Rebuilt from _allTabs by RebuildPushTargets; empty (and unused) on
-        // every section except the Live Service one.
+        // Every other non-Live build-section tab (GMS, CMS, any extra that isn't itself Live-capable
+        // - never Server Status/Settings/this section itself/another Live tab), offered as a "push
+        // straight from there" radio option alongside "Folder to Push to Live". Rebuilt from
+        // _allTabs by RebuildPushTargets; empty (and unused) on every section except the Live
+        // Service one.
         public ObservableCollection<PushTargetOption> PushTargets { get; } = new();
 
         // Which PushTargets entry is currently picked, or null for "Folder to Push to Live" (see
@@ -1041,9 +1042,10 @@ namespace CommandCenter.ViewModel
         }
 
         // (Re)builds PushTargets from _allTabs: every BuildSection-kind tab except this section
-        // itself, and only those with a real Current Build path to pull from (see
-        // HasValidBuildPath) - a tab with nothing configured, or whose configured folder no longer
-        // exists, has nothing to transfer into Live, so it doesn't belong in the list at all.
+        // itself and any other Live-capable tab (SupportsPushedToLive - see the loop below), and
+        // only those with a real Current Build path to pull from (see HasValidBuildPath) - a tab
+        // with nothing configured, or whose configured folder no longer exists, has nothing to
+        // transfer into Live, so it doesn't belong in the list at all.
         // Called once at construction (Live only), whenever _allTabs changes (a tab added or
         // deleted via Settings), and whenever any candidate tab's BuildPath changes (see
         // CandidateTab_PropertyChanged) - covers a tab gaining or losing eligibility without either
@@ -1082,7 +1084,12 @@ namespace CommandCenter.ViewModel
             foreach (var tabInfo in _allTabs)
             {
                 var candidate = tabInfo.Settings;
-                if (candidate.Kind != TabKind.BuildSection || ReferenceEquals(candidate, _settings))
+                // Never offer another Live-capable tab as a push source (2026-09-11: with extra
+                // tabs able to opt into SupportsPushedToLive via the "Enable Pushed to Live"
+                // toggle, there can be more than one Live tab - only non-Live build sections make
+                // sense to pull FROM here).
+                if (candidate.Kind != TabKind.BuildSection || ReferenceEquals(candidate, _settings)
+                    || candidate.SupportsPushedToLive)
                 {
                     continue;
                 }
