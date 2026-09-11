@@ -32,6 +32,15 @@ namespace CommandCenter.ViewModel
         private TabInfo? _selectedTab;
         private DiskSpaceStatus? _storageStatus;
 
+        // The ephemeral "Active Clients" tab - both null whenever nothing is currently tracked.
+        // Created on the first ClientLaunched from any BuildSectionViewModel, torn back down once
+        // ActiveClientsViewModel.TrackingBecameEmpty fires (every tracked client has exited or been
+        // closed). Neither of these is ever added to _appSettings.Tabs, so this tab never shows up
+        // in Settings and never gets persisted - see EnsureActiveClientsTab/
+        // OnActiveClientsTrackingEmpty below, and Model/TabKind.cs's ActiveClients case.
+        private ActiveClientsViewModel? _activeClientsViewModel;
+        private TabInfo? _activeClientsTabInfo;
+
         // Guards SelectedTab's setter against reentrancy. Saving from the unsaved-changes prompt
         // (Settings.Save() -> OnSettingsTabsCommitted() -> TabsView.Refresh()) can make WPF push
         // another SelectedItem change back into this same setter before the outer call has
@@ -338,9 +347,74 @@ namespace CommandCenter.ViewModel
             if (content is BuildSectionViewModel vm)
             {
                 vm.DiskSpaceStatusChanged += OnDiskSpaceStatusChanged;
+                vm.ClientLaunched += OnClientLaunched;
             }
 
             return new TabInfo(settings, content);
+        }
+
+        // A client was just launched from some BuildSectionViewModel's Launch panel - make sure the
+        // Active Clients tab exists (first launch since it was last empty), then track this one.
+        // Never switches the user onto that tab - they're almost certainly still sitting on the tab
+        // they just launched from, watching its own StatusText confirm the launch.
+        private void OnClientLaunched(object? sender, LaunchedClientInfo info)
+        {
+            EnsureActiveClientsTab();
+            _activeClientsViewModel!.Add(info);
+        }
+
+        private void EnsureActiveClientsTab()
+        {
+            if (_activeClientsTabInfo != null)
+            {
+                return;
+            }
+
+            _activeClientsViewModel = new ActiveClientsViewModel();
+            _activeClientsViewModel.TrackingBecameEmpty += OnActiveClientsTrackingEmpty;
+
+            // Never added to _appSettings.Tabs - this TabSettings exists purely to give TabInfo
+            // something to wrap (Title/icon for the tab strip). Order pins it past every real tab
+            // so it always trails the user's own tab order rather than jumping in the middle of it.
+            var settings = new TabSettings
+            {
+                Kind = TabKind.ActiveClients,
+                Title = "Active Clients",
+                IsVisible = true,
+                Order = int.MaxValue,
+                IsPermanent = false
+            };
+
+            _activeClientsTabInfo = new TabInfo(settings, _activeClientsViewModel);
+            Tabs.Add(_activeClientsTabInfo);
+            TabsView.Refresh();
+        }
+
+        // Every tracked client is gone (exited on its own or closed from the tab) - remove the tab
+        // itself. If the user was actually looking at it, fall back to whatever's now first in the
+        // (still-visible) tab order rather than leaving SelectedTab pointing at a tab that's about
+        // to be removed from Tabs.
+        private void OnActiveClientsTrackingEmpty(object? sender, EventArgs e)
+        {
+            if (_activeClientsTabInfo == null)
+            {
+                return;
+            }
+
+            TabInfo tabInfo = _activeClientsTabInfo;
+            bool wasSelected = ReferenceEquals(SelectedTab, tabInfo);
+
+            Tabs.Remove(tabInfo);
+            TabsView.Refresh();
+
+            if (wasSelected)
+            {
+                SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+            }
+
+            _activeClientsViewModel!.TrackingBecameEmpty -= OnActiveClientsTrackingEmpty;
+            _activeClientsViewModel = null;
+            _activeClientsTabInfo = null;
         }
 
         // A General-category tab (everything "+ Add Tab" creates now) gets no built-in servers -
@@ -376,6 +450,7 @@ namespace CommandCenter.ViewModel
             if (tabInfo.Content is BuildSectionViewModel vm)
             {
                 vm.DiskSpaceStatusChanged -= OnDiskSpaceStatusChanged;
+                vm.ClientLaunched -= OnClientLaunched;
                 vm.StopWatching();
                 vm.DeleteDocumentsFolder();
             }

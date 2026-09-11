@@ -580,6 +580,12 @@ namespace CommandCenter.ViewModel
         // on every section to drive the storage tracker at the bottom of the window.
         public event EventHandler<DiskSpaceStatus?>? DiskSpaceStatusChanged;
 
+        // Raised right after Launch() successfully starts a client process, with a snapshot of
+        // what was launched (see LaunchedClientInfo). MainViewModel subscribes to this on every
+        // section to drive the ephemeral Active Clients tab - see its EnsureActiveClientsTab/
+        // OnClientLaunched.
+        public event EventHandler<LaunchedClientInfo>? ClientLaunched;
+
         private void Settings_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
             OnPropertyChanged(nameof(SectionTitle));
@@ -1176,7 +1182,18 @@ namespace CommandCenter.ViewModel
                 process.StartInfo.UseShellExecute = true;
                 process.Start();
 
+                // Lets .NET watch for this process's exit (via Process.Exited) without needing any
+                // output/input redirection - UseShellExecute=true above only blocks stdio
+                // redirection, not exit tracking or Kill(), which is all the Active Clients tab
+                // needs. Set immediately after Start() to keep the window where a near-instant
+                // crash could be missed as small as possible - see ActiveClientViewModel's own
+                // HasExited fallback for the (unavoidable) rest of that race.
+                process.EnableRaisingEvents = true;
+
                 StatusText = $"Launched {SelectedExecutable} -> {SelectedServerOption.DisplayName}.";
+
+                ClientLaunched?.Invoke(this, new LaunchedClientInfo(
+                    process, SectionTitle, SelectedServerOption.DisplayName, VersionNumber, SelectedExecutable));
             }
             catch (Exception ex)
             {
