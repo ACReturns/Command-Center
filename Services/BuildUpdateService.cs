@@ -90,15 +90,66 @@ namespace CommandCenter.Services
                     CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
 
                     progress.Report(new UpdateProgress("Finalizing build folder...", 97));
-                    FlattenKnownWrapperFolders(destinationBuildPath, cancellationToken);
+                    FlattenKnownWrapperFolders(destinationBuildPath, progress, cancellationToken);
 
                     progress.Report(new UpdateProgress("Done", 100));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Best-effort extra context for exactly this class of failure (a path/file that
+                    // "went missing" mid-patch) - a snapshot of what the extracted archive actually
+                    // looked like at the moment of failure is far more useful for diagnosing a bad
+                    // or unexpected archive layout than the bare .NET IO exception message alone, and
+                    // saves a round-trip of asking the user to re-open the (often huge) source archive
+                    // by hand to find out what it actually contained.
+                    string diagnostics = DescribeTempDirForDiagnostics(tempDir);
+                    throw new IOException(ex.Message + diagnostics, ex);
                 }
                 finally
                 {
                     try { Directory.Delete(tempDir, recursive: true); } catch { /* best-effort cleanup */ }
                 }
             }, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Best-effort: walks the extracted-archive temp folder a few levels deep and renders it as an
+        // indented tree, so a failure mid-patch can be diagnosed from the error message alone instead
+        // of needing the user to re-open the source archive (which can be hundreds of MB to GB) to
+        // find out what layout actually tripped up the resolver. Never throws - diagnostics are a
+        // nice-to-have and must never mask or replace the real exception.
+        private static string DescribeTempDirForDiagnostics(string tempDir, int maxDepth = 3)
+        {
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine();
+                sb.AppendLine("--- Extracted archive contents at time of failure ---");
+                AppendDirectoryTree(tempDir, sb, depth: 0, maxDepth: maxDepth);
+                return sb.ToString();
+            }
+            catch
+            {
+                return string.Empty;
+            }
+        }
+
+        private static void AppendDirectoryTree(string dir, System.Text.StringBuilder sb, int depth, int maxDepth)
+        {
+            if (depth > maxDepth || !Directory.Exists(dir))
+            {
+                return;
+            }
+
+            foreach (var subDir in Directory.GetDirectories(dir))
+            {
+                sb.AppendLine(new string(' ', depth * 2) + "[dir] " + Path.GetFileName(subDir));
+                AppendDirectoryTree(subDir, sb, depth + 1, maxDepth);
+            }
+
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                sb.AppendLine(new string(' ', depth * 2) + "[file] " + Path.GetFileName(file));
+            }
         }
 
         // Collapses redundant single-folder wrappers (e.g. Patch.zip -> Patch\build\... -> the real
@@ -140,6 +191,37 @@ namespace CommandCenter.Services
             });
         }
 
+        // Trims a trailing space or period off each individual path segment of an archive
+        // entry's key BEFORE it's ever combined into a real filesystem path and written to
+        // disk. Windows/.NET path resolution (Directory.Exists, File.Exists, File.Delete,
+        // Directory.Move, File.Move, even Path.GetFullPath) silently strips a trailing space
+        // or period from a path's last component when resolving it - so an on-disk entry
+        // whose own name ends in one (e.g. a folder like "Partial Client ", observed in the
+        // wild) becomes unreachable through any of this service's later plain path-based
+        // calls even though it genuinely exists (see dotnet/runtime #24816, #120995).
+        // Sanitizing the name here, before Directory.CreateDirectory/File.Create ever see
+        // it, means the untrimmed name is never created in the first place - nothing
+        // downstream (FindContentRoot, TryGetPartialFolderIncrement's string matching, the
+        // merge/flatten helpers, etc.) ever has to know it could exist. Each segment is
+        // trimmed independently, not just the final one, since some archive tools could
+        // plausibly produce an intermediate segment with a trailing space too. A segment
+        // that is ONLY spaces/periods is left alone rather than collapsed to empty, since an
+        // empty segment could otherwise merge two directory levels together.
+        private static string SanitizeEntryPath(string entryKey)
+        {
+            var segments = entryKey.Split('/', '\\');
+            for (int i = 0; i < segments.Length; i++)
+            {
+                string trimmed = segments[i].TrimEnd(' ', '.');
+                if (trimmed.Length > 0)
+                {
+                    segments[i] = trimmed;
+                }
+            }
+
+            return string.Join(Path.DirectorySeparatorChar, segments);
+        }
+
         private static async Task ExtractArchiveAsync(string archivePath, string destinationDir, CancellationToken cancellationToken, Action<int, int> onEntryExtracted)
         {
             using var archive = ArchiveFactory.Open(archivePath);
@@ -152,7 +234,7 @@ namespace CommandCenter.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                string destPath = Path.GetFullPath(Path.Combine(destinationDir, entry.Key!));
+                string destPath = Path.GetFullPath(Path.Combine(destinationDir, SanitizeEntryPath(entry.Key!)));
                 if (!destPath.StartsWith(destRoot, StringComparison.OrdinalIgnoreCase))
                 {
                     throw new IOException("Archive contains an entry outside the extraction folder.");
@@ -172,6 +254,140 @@ namespace CommandCenter.Services
 
                 done++;
                 onEntryExtracted(done, total);
+            }
+
+            // SanitizeEntryPath above already keeps a trailing-space/period name from being
+            // written to disk in the first place, so this pass should normally find nothing
+            // to do. It's left in place as a defensive second layer only - e.g. in case some
+            // future code path writes files into destinationDir by a means other than the
+            // per-entry loop above (which is the one and only place SanitizeEntryPath runs).
+            NormalizeTrailingSpaceOrDotNames(destinationDir, cancellationToken);
+            RemoveIgnoredFiles(destinationDir, cancellationToken);
+        }
+
+        // checksums.md5 rides along in patch archives (typically one per Partial_Client-style
+        // folder, sitting loose next to the real payload zip) but never belongs in an actual build.
+        // It was previously discarded only as an incidental side effect of the Partial_Client
+        // resolution logic below - and only on the branches that actually run that logic - so one
+        // sitting somewhere that logic doesn't touch (a plain, non-Partial_Client patch; directly
+        // inside a nested archive) would otherwise ride straight through into the build folder.
+        // Deleting it here, at the same shared choke point the trailing-space normalization above
+        // uses, makes the exclusion unconditional and independent of which resolution branch ends
+        // up running - it's simply gone before any of that logic ever sees it.
+        private const string ChecksumsFileName = "checksums.md5";
+
+        private static void RemoveIgnoredFiles(string dir, CancellationToken cancellationToken)
+        {
+            foreach (var file in Directory.GetFiles(dir))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.Equals(Path.GetFileName(file), ChecksumsFileName, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.SetAttributes(file, FileAttributes.Normal);
+                    File.Delete(file);
+                }
+            }
+
+            foreach (var subDir in Directory.GetDirectories(dir))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                RemoveIgnoredFiles(subDir, cancellationToken);
+            }
+        }
+
+        // Recursively walks dir and renames any file or folder whose name ends in a
+        // trailing space or period, trimming it (falling back to a numeric "(1)",
+        // "(2)", ... suffix if the trimmed name would collide with something already
+        // there). Windows' plain (non-extended-length) path resolution silently
+        // strips such trailing characters from the last component of any path before
+        // resolving it - so a real, on-disk entry named e.g. "Partial Client " (with
+        // the trailing space) becomes unreachable through this service's own
+        // Directory.Exists/File.Exists/Directory.GetFiles/Directory.Delete/etc. calls
+        // afterward, even though it genuinely exists. Renaming it away immediately
+        // after extraction avoids that entirely.
+        //
+        // Children are discovered via DirectoryInfo.EnumerateFileSystemInfos rather
+        // than a path-based Directory.Exists/File.Exists check on each child, because
+        // the type (file vs. directory) of a child whose own name ends in a trailing
+        // space/period can't be determined by resolving its path directly - the same
+        // trimming bug this method exists to work around would just misresolve it
+        // there too. EnumerateFileSystemInfos instead gets each child's name and type
+        // from the parent's own directory listing (which - since dir itself is never
+        // renamed by this method, only its descendants - is never subject to this
+        // problem), the same way FindFirstFile/os.scandir report a child's attributes
+        // without re-resolving its individual path.
+        //
+        // A trailing-space/period directory is renamed before recursing into it
+        // (rather than the other way around) so the recursive call always resolves
+        // its own starting directory as a plain, already-clean path - descending into
+        // a not-yet-renamed child by its untrimmed name would hit the exact same
+        // resolution problem one level down.
+        private static void NormalizeTrailingSpaceOrDotNames(string dir, CancellationToken cancellationToken)
+        {
+            var dirInfo = new DirectoryInfo(dir);
+            // Materialized with ToList() rather than iterated lazily: this loop renames (moves)
+            // entries INSIDE the very directory EnumerateFileSystemInfos is reading, and Windows
+            // does not guarantee a live FindNextFile-style enumeration stays consistent - or even
+            // visits every entry exactly once - across a directory mutation mid-walk. Snapshotting
+            // the listing first means every rename below acts on a fixed, already-known list instead
+            // of a directory handle whose contents are shifting under it.
+            foreach (var entry in dirInfo.EnumerateFileSystemInfos().ToList())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                string path = entry.FullName;
+                bool isDirectory = entry is DirectoryInfo;
+                string name = entry.Name;
+
+                if (name.Length > 0 && (name[name.Length - 1] == ' ' || name[name.Length - 1] == '.'))
+                {
+                    string trimmed = name.TrimEnd(' ', '.');
+                    if (trimmed.Length == 0)
+                    {
+                        // Defensive: an all-space/all-period name has nothing sensible
+                        // to trim to - leave it alone rather than produce an empty name.
+                        // Not expected to occur in practice.
+                        continue;
+                    }
+
+                    string candidate = trimmed;
+                    int suffix = 1;
+                    while (File.Exists(Path.Combine(dir, candidate)) || Directory.Exists(Path.Combine(dir, candidate)))
+                    {
+                        candidate = $"{trimmed} ({suffix})";
+                        suffix++;
+                    }
+
+                    string newPath = Path.Combine(dir, candidate);
+
+                    // The `\\?\` extended-length prefix is what lets this rename
+                    // address the untrimmed, literal current name - a plain
+                    // File.Move/Directory.Move here would suffer the exact same
+                    // trailing-character stripping this method exists to work
+                    // around, and would either silently miss the real entry or
+                    // (worse) redirect onto whatever unrelated path the trimmed
+                    // name happens to already resolve to. Both path and newPath are
+                    // always fully-qualified absolute paths here (rooted under the
+                    // temp/build directories this service already uses), which is
+                    // what the `\\?\` form requires.
+                    string longSourcePath = @"\\?\" + path;
+                    string longDestPath = @"\\?\" + newPath;
+
+                    if (isDirectory)
+                    {
+                        Directory.Move(longSourcePath, longDestPath);
+                    }
+                    else
+                    {
+                        File.Move(longSourcePath, longDestPath);
+                    }
+
+                    path = newPath;
+                }
+
+                if (isDirectory)
+                {
+                    NormalizeTrailingSpaceOrDotNames(path, cancellationToken);
+                }
             }
         }
 
@@ -196,6 +412,15 @@ namespace CommandCenter.Services
         // that ships its partial-client payload split across several numbered folders is recognized
         // the same as a single unnumbered one. Increment is parsed out so ResolvePartialClientPayloadAsync
         // below can merge multiple matches back together in the right order.
+        // Separators seen in practice between a base name and its trailing increment digits. An
+        // underscore ("Partial Client_2") was the only one originally handled, but a folder tree
+        // extracted straight from a zip/Google Drive export just as often comes out space-separated
+        // ("Partial Client 2") or hyphenated ("Partial Client-2") - both real layouts, not just
+        // underscore, need to resolve to the same "numbered variant" handling below. A bare numeric
+        // suffix with no separator at all ("PartialClient2") is accepted too, since "PartialClient"
+        // (no space) is itself one of the recognized base names.
+        private static readonly string[] IncrementSeparators = { "_", " ", "-", "" };
+
         private static bool TryGetPartialFolderIncrement(string folderName, out int increment)
         {
             foreach (var baseName in PartialFolderNames)
@@ -206,13 +431,22 @@ namespace CommandCenter.Services
                     return true;
                 }
 
-                string prefix = baseName + "_";
-                if (folderName.Length > prefix.Length &&
-                    folderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
-                    int.TryParse(folderName.AsSpan(prefix.Length), out int parsed))
+                foreach (var separator in IncrementSeparators)
                 {
-                    increment = parsed;
-                    return true;
+                    string prefix = baseName + separator;
+                    if (folderName.Length > prefix.Length &&
+                        folderName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        string remainder = folderName.Substring(prefix.Length);
+                        // Digits only - int.TryParse alone would also accept a leading +/- sign or
+                        // stray whitespace (e.g. "Partial Client_-1"), which isn't a real increment.
+                        if (remainder.Length > 0 && remainder.All(c => c >= '0' && c <= '9') &&
+                            int.TryParse(remainder, out int parsed))
+                        {
+                            increment = parsed;
+                            return true;
+                        }
+                    }
                 }
             }
 
@@ -240,27 +474,52 @@ namespace CommandCenter.Services
         // it isn't copied in as a stray zip. Extracting in place overlays onto whatever loose files
         // already sit there (File.Create truncates on a name collision), the same "patching" overlay
         // semantics used everywhere else in this service - nothing here deletes first.
+        //
+        // This used to stop after a single pass, which meant an archive nested inside another
+        // archive's own nested archive wasn't handled (only "one level deep" of unwrapping). A real
+        // user patch (2026-09-12, a MapleStory/Nexon "Live Minor" patch) hit exactly that: manually
+        // extracting the source archive by hand showed a Partial_Client.zip that was itself nested
+        // inside another zip one level further down than this method reached. Fixed by looping:
+        // after unwrapping whatever archives are directly inside folderPath, re-scan folderPath again
+        // - extracting one archive can reveal another sitting where the first one used to be - and
+        // keep going until a pass finds no archive files left. maxPasses is a defensive cap, not an
+        // expected real-world depth, in case a pathological archive keeps re-creating an archive file
+        // with the same name forever; a legitimate nesting is expected to bottom out in a handful of
+        // passes at most.
         private static async Task ExtractNestedArchivesAsync(string folderPath, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
         {
-            var nestedArchives = Directory.GetFiles(folderPath)
-                .Where(f => SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
-                .ToList();
+            const int maxPasses = 25;
 
-            foreach (var archivePath in nestedArchives)
+            for (int pass = 0; pass < maxPasses; pass++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                var nestedArchives = Directory.GetFiles(folderPath)
+                    .Where(f => SupportedExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase))
+                    .ToList();
 
-                string archiveName = Path.GetFileName(archivePath);
-                progress.Report(new UpdateProgress($"Extracting {archiveName}...", 52));
-
-                await ExtractArchiveAsync(archivePath, folderPath, cancellationToken, (done, total) =>
+                if (nestedArchives.Count == 0)
                 {
-                    progress.Report(new UpdateProgress($"Extracting {archiveName} ({done}/{total})...", 52));
-                }).ConfigureAwait(false);
+                    return;
+                }
 
-                File.SetAttributes(archivePath, FileAttributes.Normal);
-                File.Delete(archivePath);
+                foreach (var archivePath in nestedArchives)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    string archiveName = Path.GetFileName(archivePath);
+                    progress.Report(new UpdateProgress($"Extracting {archiveName}...", 52));
+
+                    await ExtractArchiveAsync(archivePath, folderPath, cancellationToken, (done, total) =>
+                    {
+                        progress.Report(new UpdateProgress($"Extracting {archiveName} ({done}/{total})...", 52));
+                    }).ConfigureAwait(false);
+
+                    File.SetAttributes(archivePath, FileAttributes.Normal);
+                    File.Delete(archivePath);
+                }
             }
+
+            throw new InvalidOperationException(
+                $"Found an archive nested inside another archive {maxPasses} levels deep in '{folderPath}' - this looks like a circular or malformed archive rather than a real nested payload. Patch aborted.");
         }
 
         private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, IProgress<UpdateProgress> progress, CancellationToken cancellationToken, bool allowGenericWrapperFallback = true)
@@ -354,11 +613,15 @@ namespace CommandCenter.Services
             }
 
             // Discard everything else extracted alongside the payload (checksums.md5, etc.) - only
-            // the Partial_Client archive or matched folder(s) survive.
+            // the Partial_Client archive or matched folder(s) survive. Existence is re-checked right
+            // before each delete rather than trusting the GetFiles/GetDirectories snapshot above -
+            // this is best-effort cleanup of stuff we're discarding anyway, so it shouldn't abort an
+            // otherwise-valid patch just because one of those extras was already gone by the time we
+            // got to it (e.g. a real-time antivirus scan grabbing a freshly-extracted file).
             foreach (var file in Directory.GetFiles(contentRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (file == partialArchivePath)
+                if (file == partialArchivePath || !File.Exists(file))
                 {
                     continue;
                 }
@@ -370,7 +633,7 @@ namespace CommandCenter.Services
             foreach (var dir in Directory.GetDirectories(contentRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (partialFolderPaths.Contains(dir))
+                if (partialFolderPaths.Contains(dir) || !Directory.Exists(dir))
                 {
                     continue;
                 }
@@ -395,6 +658,7 @@ namespace CommandCenter.Services
                 progress.Report(new UpdateProgress($"Merging {partialFolderPaths.Count} partial-client folders...", 51));
                 string mergedDir = Path.Combine(tempDir, "_PartialClientMerged_" + Guid.NewGuid().ToString("N"));
                 Directory.CreateDirectory(mergedDir);
+                var skippedDuringMerge = new List<string>();
 
                 foreach (var folderPath in partialFolderPaths)
                 {
@@ -403,7 +667,15 @@ namespace CommandCenter.Services
                     // Extract any archive this folder carries in place, before it gets merged in, so
                     // its contents (not the raw zip/7z itself) are what lands in mergedDir below.
                     await ExtractNestedArchivesAsync(folderContentRoot, progress, cancellationToken).ConfigureAwait(false);
-                    MoveDirectoryContents(folderContentRoot, mergedDir, cancellationToken);
+                    MoveDirectoryContents(folderContentRoot, mergedDir, cancellationToken, skippedDuringMerge);
+                }
+
+                if (skippedDuringMerge.Count > 0)
+                {
+                    // Surfaced but not fatal - see the skippedItems remarks on MoveDirectoryContents.
+                    progress.Report(new UpdateProgress(
+                        $"Warning: {skippedDuringMerge.Count} item(s) vanished while merging partial-client folders and were skipped: {string.Join(", ", skippedDuringMerge.Select(Path.GetFileName))}",
+                        51));
                 }
 
                 return mergedDir;
@@ -467,7 +739,7 @@ namespace CommandCenter.Services
         // this layout, and it's a no-op when a wrapper folder isn't present.
         private static readonly string[] WrapperFoldersToFlatten = { "AdminClient", "Bin" };
 
-        private static void FlattenKnownWrapperFolders(string destinationBuildPath, CancellationToken cancellationToken)
+        private static void FlattenKnownWrapperFolders(string destinationBuildPath, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
         {
             foreach (var wrapperName in WrapperFoldersToFlatten)
             {
@@ -477,7 +749,16 @@ namespace CommandCenter.Services
                     continue;
                 }
 
-                MoveDirectoryContents(wrapperPath, destinationBuildPath, cancellationToken);
+                var skipped = new List<string>();
+                MoveDirectoryContents(wrapperPath, destinationBuildPath, cancellationToken, skipped);
+
+                if (skipped.Count > 0)
+                {
+                    // Surfaced but not fatal - see the skippedItems remarks on MoveDirectoryContents.
+                    progress.Report(new UpdateProgress(
+                        $"Warning: {skipped.Count} item(s) vanished while flattening '{wrapperName}' and were skipped: {string.Join(", ", skipped.Select(Path.GetFileName))}",
+                        97));
+                }
 
                 try
                 {
@@ -496,11 +777,26 @@ namespace CommandCenter.Services
         // Directory.Move/File.Move are cheap renames rather than copies). If destinationDir already
         // has an item with the same name - e.g. the build itself also has a top-level "Bin" folder in
         // addition to the wrapper - merges into it recursively instead of overwriting it outright.
-        private static void MoveDirectoryContents(string sourceDir, string destinationDir, CancellationToken cancellationToken)
+        //
+        // skippedItems collects the full path of anything that had already vanished by the time this
+        // reached it (e.g. a real-time antivirus scan racing a freshly-extracted file). Unlike the
+        // "discard everything else" cleanup in ResolvePartialClientPayloadAsync - where a vanished
+        // item was already known junk and skipping it silently is fine - this helper moves actual
+        // PAYLOAD (a merged Partial-Client folder, or an AdminClient/Bin wrapper's contents), so a
+        // vanished item here still shouldn't hard-abort the whole patch, but it's also not something
+        // to drop in total silence. Callers report skippedItems back to the user once the operation
+        // that called them completes, instead of letting a "Done / 100%" hide a quietly incomplete copy.
+        private static void MoveDirectoryContents(string sourceDir, string destinationDir, CancellationToken cancellationToken, List<string> skippedItems)
         {
             foreach (var filePath in Directory.GetFiles(sourceDir))
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                if (!File.Exists(filePath))
+                {
+                    skippedItems.Add(filePath);
+                    continue;
+                }
 
                 string destPath = Path.Combine(destinationDir, Path.GetFileName(filePath));
                 if (File.Exists(destPath))
@@ -516,6 +812,12 @@ namespace CommandCenter.Services
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
+                if (!Directory.Exists(subDirPath))
+                {
+                    skippedItems.Add(subDirPath);
+                    continue;
+                }
+
                 string destSubDirPath = Path.Combine(destinationDir, Path.GetFileName(subDirPath));
                 if (!Directory.Exists(destSubDirPath))
                 {
@@ -523,7 +825,7 @@ namespace CommandCenter.Services
                 }
                 else
                 {
-                    MoveDirectoryContents(subDirPath, destSubDirPath, cancellationToken);
+                    MoveDirectoryContents(subDirPath, destSubDirPath, cancellationToken, skippedItems);
                     Directory.Delete(subDirPath, recursive: true);
                 }
             }
