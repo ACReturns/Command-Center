@@ -24,7 +24,17 @@ namespace CommandCenter.Model
         // Settings tabs specifically, which are always-one-of-a-kind singletons (see TabKind), so
         // letting an extra build tab also wear one of those icons would make it look like a second
         // Server Status or Settings tab in the tray. DefaultIconFor below still uses both files for
-        // their actual owning tabs; only the picker excludes them.
+        // their actual owning tabs; only the picker excludes them. OpTool.ico is the same story -
+        // reserved for the OpTool singleton tab, never offered as a preset.
+        //
+        // img/Server Up.gif and img/Server Down.gif (see AppPaths.ServerUpGif/ServerDownGif) live
+        // in this same img/ source folder (though unlike the .ico files above, they're copied to
+        // the output directory as loose files, not embedded - see the csproj) - they are Server
+        // Status' animated up/down indicators, not tab icons, and must never be offered here either
+        // - excluded today simply because Presets is a hand-picked list (not a scan of img/) and
+        // ChooseIconDialog.Browse_Click's file filter ("*.ico;*.png;*.jpg;*.jpeg") already omits
+        // .gif, but call this out explicitly so anyone later turning Presets or Browse into a scan
+        // of img/ knows to keep excluding both gifs.
         public static IReadOnlyList<IconChoice> Presets { get; } = new List<IconChoice>
         {
             new("Maple", "img/Maple.ico"),
@@ -62,6 +72,7 @@ namespace CommandCenter.Model
         public static string DefaultIconFor(TabKind kind, SectionCategory category) => kind switch
         {
             TabKind.ServerStatus => "img/Servers.ico",
+            TabKind.OpTool => "img/OpTool.ico",
             TabKind.Settings => "img/Settings.ico",
             TabKind.BuildSection => category switch
             {

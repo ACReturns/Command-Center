@@ -34,13 +34,28 @@ namespace CommandCenter
         public static string DebugCommandsFileFor(Guid tabId) =>
             Path.Combine(DebugCommandsFolder, tabId.ToString(), DebugCommandListFileName);
 
+        // WebView2's user data folder for the OpTool tab (see View/OpToolView.xaml.cs). Its
+        // default would be next to the exe, which isn't writable from Program Files. The OpTool
+        // session runs InPrivate, so no cookies/logins persist here - just browser housekeeping.
+        public static string WebView2DataFolder => Path.Combine(AppDataFolder, "WebView2");
+
         public static string ServersFolder => Path.Combine(AppContext.BaseDirectory, "Servers");
 
         public static string LiveWorldsFile => Path.Combine(ServersFolder, "live_server_status.json");
         public static string StagingWorldsFile => Path.Combine(ServersFolder, "staging_server_status.json");
         public static string TestWorldsFile => Path.Combine(ServersFolder, "test_server_status.json");
 
-        public static string ServerUpGif => Path.Combine(ServersFolder, "Server Up.gif");
-        public static string ServerDownGif => Path.Combine(ServersFolder, "Server Down.gif");
+        // Where the two Server Status gifs land in the OUTPUT folder - img\*.gif is copied there
+        // by the csproj's <None Include="img\*.gif" CopyToOutputDirectory="PreserveNewest" /> item,
+        // the exact same "loose file copied next to the exe" mechanism the Servers\*.json files
+        // above already use, just from img\ instead of Servers\. Originally these lived under the
+        // Servers folder itself; moved into img/ (2026-09-22) alongside the tab icons since that's
+        // where the user now keeps them on disk, but they are NOT embedded pack resources like
+        // img\*.ico is (that route was tried first and didn't pan out - WpfAnimatedGif's
+        // AnimatedSource couldn't reliably load them from an embedded pack-resource stream, even
+        // after percent-encoding the space in each file name - so this stays a real absolute
+        // filesystem path, same as every other AppPaths.*File/*Folder member).
+        public static string ServerUpGif => Path.Combine(AppContext.BaseDirectory, "img", "Server Up.gif");
+        public static string ServerDownGif => Path.Combine(AppContext.BaseDirectory, "img", "Server Down.gif");
     }
 }

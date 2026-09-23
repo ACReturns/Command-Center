@@ -62,6 +62,7 @@ namespace CommandCenter.ViewModel
 
             Settings = new SettingsViewModel(_appSettings, _settingsService, OnSettingsTabsCommitted);
             ServerStatus = new ServerStatusViewModel(_appSettings, _settingsService);
+            OpTool = new OpToolViewModel();
 
             foreach (var tabSettings in _appSettings.Tabs.OrderBy(t => t.Order))
             {
@@ -99,8 +100,9 @@ namespace CommandCenter.ViewModel
 
         public SettingsViewModel Settings { get; }
         public ServerStatusViewModel ServerStatus { get; }
+        public OpToolViewModel OpTool { get; }
 
-        // Every top-level tab - GMS/CMS/Live/Server Status/Settings and any extra - regardless of
+        // Every top-level tab - GMS/CMS/Live/Server Status/OpTool/Settings and any extra - regardless of
         // visibility. TabsView (sorted + filtered to IsVisible) is what the TabControl renders.
         public ObservableCollection<TabInfo> Tabs { get; } = new();
         public ICollectionView TabsView { get; }
@@ -340,6 +342,7 @@ namespace CommandCenter.ViewModel
             {
                 TabKind.BuildSection => CreateBuildSectionViewModel(settings),
                 TabKind.ServerStatus => ServerStatus,
+                TabKind.OpTool => OpTool,
                 TabKind.Settings => Settings,
                 _ => throw new InvalidOperationException($"Unknown tab kind: {settings.Kind}")
             };

@@ -33,6 +33,7 @@ namespace CommandCenter.Model
                 MigrateIfNeeded(settings);
                 MigrateServersIfNeeded(settings);
                 EnsurePermanentLiveSupportsPushedToLive(settings);
+                EnsureOpToolTab(settings);
                 return settings;
             }
             catch (Exception)
@@ -48,8 +49,8 @@ namespace CommandCenter.Model
             File.WriteAllText(_settingsPath, json);
         }
 
-        // The 5 tabs every install starts with: GMS, CMS, Live Service Builds, Server Status,
-        // Settings - all permanent, all visible, in that order.
+        // The 6 tabs every install starts with: GMS, CMS, Live Service Builds, Server Status,
+        // OpTool, Settings - all permanent, all visible, in that order.
         private static AppSettings CreateDefaultSettings() => new AppSettings { Tabs = BuildDefaultPermanentTabs() };
 
         private static List<TabSettings> BuildDefaultPermanentTabs() => new()
@@ -61,8 +62,37 @@ namespace CommandCenter.Model
             new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Live, IsPermanent = true, Title = "Live Service Builds", Order = 2,
                 SupportsPushedToLive = true, Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Live).ToList() },
             new TabSettings { Kind = TabKind.ServerStatus, IsPermanent = true, Title = "Server Status", Order = 3 },
-            new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 4 },
+            new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = 4 },
+            new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 5 },
         };
+
+        private const string OpToolTabTitle = "OpTool";
+
+        // Adds the permanent OpTool tab to a settings.json saved before it existed - every
+        // existing install already has Tabs populated, so BuildDefaultPermanentTabs never runs for
+        // it and the tab would otherwise never appear. Slots it in right before Settings (shifting
+        // Settings and anything after it down one) so it lands where a fresh install would have
+        // it, without disturbing the user's own ordering of everything else. Idempotent: once an
+        // OpTool tab exists - visible or hidden by the user - this does nothing, so hiding it in
+        // Settings sticks. Runs after MigrateIfNeeded, so pre-tabs legacy files are covered too.
+        // Not persisted here; it's written out the next time anything saves settings.
+        private static void EnsureOpToolTab(AppSettings settings)
+        {
+            if (settings.Tabs.Any(t => t.Kind == TabKind.OpTool))
+            {
+                return;
+            }
+
+            var settingsTab = settings.Tabs.FirstOrDefault(t => t.Kind == TabKind.Settings);
+            int order = settingsTab?.Order ?? (settings.Tabs.Count == 0 ? 0 : settings.Tabs.Max(t => t.Order) + 1);
+
+            foreach (var tab in settings.Tabs.Where(t => t.Order >= order))
+            {
+                tab.Order++;
+            }
+
+            settings.Tabs.Add(new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = order });
+        }
 
         // Backfills TabSettings.Servers for every BuildSection tab in a settings.json saved before
         // per-tab servers existed - null there means "never migrated" (see TabSettings.Servers),

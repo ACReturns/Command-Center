@@ -127,6 +127,11 @@
                 <DataTemplate DataType="{x:Type ViewModel:ActiveClientsViewModel}">
                     <View:ActiveClientsView/>
                 </DataTemplate>
+                <!-- OpToolHost, not OpToolView directly: keeps one WebView2 alive across tab
+                     switches so the OpTool page/login isn't thrown away - see View/OpToolHost.cs. -->
+                <DataTemplate DataType="{x:Type ViewModel:OpToolViewModel}">
+                    <View:OpToolHost/>
+                </DataTemplate>
             </TabControl.Resources>
             <TabControl.ItemTemplate>
                 <DataTemplate>

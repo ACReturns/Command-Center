@@ -1,0 +1,70 @@
+<UserControl x:Class="CommandCenter.View.OpToolView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+             mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="560">
+    <!-- Embedded QA OpTool browser. Nothing here stores or fills credentials - Go just points the
+         WebView2 at the picked endpoint and you sign in on the OpTool's own login page. See
+         OpToolView.xaml.cs for the private (InPrivate) session + disabled autofill/password save,
+         and OpToolHost.cs for why this one view instance survives tab switches. -->
+    <Grid Margin="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Grid.Row="0" Margin="0,0,0,6" LastChildFill="True">
+            <TextBlock DockPanel.Dock="Left" Text="OpTool:" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,6,0"/>
+
+            <ComboBox DockPanel.Dock="Left" Width="220" VerticalContentAlignment="Center"
+                      ItemsSource="{Binding Endpoints}" SelectedItem="{Binding SelectedEndpoint}">
+                <ComboBox.InputBindings>
+                    <KeyBinding Key="Enter" Command="{Binding GoCommand}"/>
+                </ComboBox.InputBindings>
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Label}"/>
+                            <TextBlock Text="{Binding AccessLabel, StringFormat=' ({0})'}" Foreground="Gray"/>
+                        </StackPanel>
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
+
+            <Button DockPanel.Dock="Left" Content="Go" Width="60" Margin="6,0,0,0" Command="{Binding GoCommand}"/>
+
+            <Button DockPanel.Dock="Left" x:Name="BackButton" Content="&#x2190; Back" Padding="8,2" Margin="14,0,0,0"
+                    IsEnabled="False" ToolTip="Back" Click="BackButton_Click"/>
+            <Button DockPanel.Dock="Left" x:Name="ReloadButton" Content="&#x27F3; Reload" Padding="8,2" Margin="4,0,0,0"
+                    IsEnabled="False" ToolTip="Reload this page" Click="ReloadButton_Click"/>
+
+            <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="12,0,0,0"
+                       Foreground="#FF555555" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
+
+        <Border Grid.Row="1" BorderBrush="#FFD0D0D0" BorderThickness="1" Background="White">
+            <Grid>
+                <!-- Shown until the first Go. WebView2 is an HWND, so it always paints on top of
+                     WPF content in the same spot - these panels only show while it's Collapsed. -->
+                <StackPanel x:Name="PlaceholderPanel" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460">
+                    <TextBlock Text="Pick an OpTool environment above and hit Go." FontSize="14" FontWeight="SemiBold"
+                               TextAlignment="Center" TextWrapping="Wrap"/>
+                    <TextBlock Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap" Foreground="#FF555555"
+                               Text="You sign in on the OpTool's own login page. Command Center never stores or fills in credentials, and the session is private - closing Command Center signs you out."/>
+                </StackPanel>
+
+                <StackPanel x:Name="ErrorPanel" Visibility="Collapsed" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460">
+                    <TextBlock x:Name="ErrorTitle" FontSize="14" FontWeight="SemiBold" Foreground="#FFB00020"
+                               TextAlignment="Center" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="ErrorDetail" Margin="0,6,0,0" TextAlignment="Center" TextWrapping="Wrap" Foreground="#FF555555"/>
+                    <Button x:Name="GetRuntimeButton" Visibility="Collapsed" Content="Get the WebView2 Runtime"
+                            HorizontalAlignment="Center" Padding="10,4" Margin="0,10,0,0" Click="GetRuntimeButton_Click"/>
+                </StackPanel>
+
+                <wv2:WebView2 x:Name="Browser" Visibility="Collapsed"/>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>
