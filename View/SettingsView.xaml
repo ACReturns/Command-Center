@@ -267,6 +267,12 @@
                         <Run Text="When enabled, the app relaunches itself elevated (you'll see a Windows UAC prompt) the next time it starts."/>
                         <Run Text=" Takes effect on next launch, not the current session. Remember to click Save Settings below."/>
                     </TextBlock>
+
+                    <!-- Source sheet for the Maintenance Verification tab (Ver/Tag/Checksum columns) -
+                         see SettingsViewModel.MaintenanceSheetUrl / MaintenanceVerificationViewModel.
+                         SheetUrl, which falls back to MaintenanceDefaults.SheetUrl if this is blank. -->
+                    <TextBlock Text="Maintenance Verification sheet URL" Margin="0,10,0,2"/>
+                    <TextBox Text="{Binding MaintenanceSheetUrl, UpdateSourceTrigger=PropertyChanged}"/>
                 </StackPanel>
             </Border>
 

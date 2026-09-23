@@ -73,6 +73,7 @@ namespace CommandCenter.Model
         {
             TabKind.ServerStatus => "img/Servers.ico",
             TabKind.OpTool => "img/OpTool.ico",
+            TabKind.MaintenanceVerification => "img/Checksum.ico",
             TabKind.Settings => "img/Settings.ico",
             TabKind.BuildSection => category switch
             {

@@ -96,6 +96,19 @@ namespace CommandCenter.Model
         // behavior exactly.
         public bool RunAsAdministrator { get; set; } = false;
 
+        // Google Sheets URL the Maintenance Version Verification tab pulls Ver/Tag/Checksum rows
+        // from - see MaintenanceDefaults.SheetUrl and MaintenanceVerificationViewModel.SheetUrl,
+        // which falls back to the same default if this is ever blank. An existing settings.json
+        // without this key just deserializes it to the default.
+        public string MaintenanceSheetUrl { get; set; } = MaintenanceDefaults.SheetUrl;
+
+        // Whether the Maintenance Version Verification tab's release-version groups (v268, v269, ...)
+        // are laid out newest-family-first (true) or oldest-family-first / sheet order (false, the
+        // original behavior). Toggled from a checkbox on the tab itself and saved immediately - see
+        // MaintenanceVerificationViewModel.NewestFirst. An existing settings.json without this key
+        // just deserializes it to false, matching prior behavior exactly.
+        public bool MaintenanceNewestFirst { get; set; } = false;
+
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
         // resets these to empty immediately after migrating them into Tabs once.

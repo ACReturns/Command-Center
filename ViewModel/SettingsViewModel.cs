@@ -22,6 +22,7 @@ namespace CommandCenter.ViewModel
         private DispatcherTimer? _statusClearTimer;
         private bool _isDirty;
         private bool _runAsAdministrator;
+        private string _maintenanceSheetUrl = string.Empty;
 
         // onTabsCommitted is called after Save() has already updated _appSettings.Tabs in place
         // and persisted it - MainViewModel uses it to reconcile its live Tabs/TabInfo collection
@@ -62,6 +63,22 @@ namespace CommandCenter.ViewModel
             set
             {
                 if (SetProperty(ref _runAsAdministrator, value))
+                {
+                    IsDirty = true;
+                }
+            }
+        }
+
+        // Editable "Maintenance Verification sheet URL" field - same draft pattern as
+        // RunAsAdministrator above. MaintenanceVerificationViewModel.SheetUrl falls back to
+        // MaintenanceDefaults.SheetUrl if this is ever blank, so clearing the field and saving
+        // just resets it to the built-in sheet rather than breaking the tab.
+        public string MaintenanceSheetUrl
+        {
+            get => _maintenanceSheetUrl;
+            set
+            {
+                if (SetProperty(ref _maintenanceSheetUrl, value))
                 {
                     IsDirty = true;
                 }
@@ -172,6 +189,9 @@ namespace CommandCenter.ViewModel
             _runAsAdministrator = _appSettings.RunAsAdministrator;
             OnPropertyChanged(nameof(RunAsAdministrator));
 
+            _maintenanceSheetUrl = _appSettings.MaintenanceSheetUrl;
+            OnPropertyChanged(nameof(MaintenanceSheetUrl));
+
             IsDirty = false;
         }
 
@@ -261,6 +281,9 @@ namespace CommandCenter.ViewModel
 
             _appSettings.Tabs = newLiveList;
             _appSettings.RunAsAdministrator = RunAsAdministrator;
+            _appSettings.MaintenanceSheetUrl = string.IsNullOrWhiteSpace(MaintenanceSheetUrl)
+                ? MaintenanceDefaults.SheetUrl
+                : MaintenanceSheetUrl.Trim();
             _settingsService.Save(_appSettings);
 
             // Clear IsDirty (via LoadDraftFromLive) BEFORE notifying MainViewModel of the commit.

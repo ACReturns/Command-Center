@@ -343,6 +343,7 @@ namespace CommandCenter.ViewModel
                 TabKind.BuildSection => CreateBuildSectionViewModel(settings),
                 TabKind.ServerStatus => ServerStatus,
                 TabKind.OpTool => OpTool,
+                TabKind.MaintenanceVerification => new MaintenanceVerificationViewModel(_appSettings, _settingsService, () => _appSettings.Tabs),
                 TabKind.Settings => Settings,
                 _ => throw new InvalidOperationException($"Unknown tab kind: {settings.Kind}")
             };

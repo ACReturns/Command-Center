@@ -1,0 +1,24 @@
+<Window x:Class="CommandCenter.View.GoogleSignInWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
+        Title="Sign in to Google"
+        Width="980" Height="760"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False">
+    <DockPanel>
+        <Border DockPanel.Dock="Top" Background="#FFFF8C00" Padding="10,6">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Done" Padding="14,3" Click="Done_Click"/>
+                <TextBlock x:Name="StatusText"
+                           VerticalAlignment="Center"
+                           FontWeight="SemiBold"
+                           Foreground="Black"
+                           TextWrapping="Wrap"
+                           Margin="0,0,10,0"
+                           Text="Sign in with your work Google account. This window closes on its own once the version sheet opens."/>
+            </DockPanel>
+        </Border>
+        <wv2:WebView2 x:Name="Web"/>
+    </DockPanel>
+</Window>

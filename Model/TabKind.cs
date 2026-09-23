@@ -16,6 +16,7 @@ namespace CommandCenter.Model
         ServerStatus,
         Settings,
         ActiveClients,
-        OpTool
+        OpTool,
+        MaintenanceVerification
     }
 }

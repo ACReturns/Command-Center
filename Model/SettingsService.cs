@@ -34,6 +34,7 @@ namespace CommandCenter.Model
                 MigrateServersIfNeeded(settings);
                 EnsurePermanentLiveSupportsPushedToLive(settings);
                 EnsureOpToolTab(settings);
+                EnsureMaintenanceVerificationTab(settings);
                 return settings;
             }
             catch (Exception)
@@ -49,8 +50,8 @@ namespace CommandCenter.Model
             File.WriteAllText(_settingsPath, json);
         }
 
-        // The 6 tabs every install starts with: GMS, CMS, Live Service Builds, Server Status,
-        // OpTool, Settings - all permanent, all visible, in that order.
+        // The 7 tabs every install starts with: GMS, CMS, Live Service Builds, Server Status,
+        // OpTool, Maintenance Verification, Settings - all permanent, all visible, in that order.
         private static AppSettings CreateDefaultSettings() => new AppSettings { Tabs = BuildDefaultPermanentTabs() };
 
         private static List<TabSettings> BuildDefaultPermanentTabs() => new()
@@ -63,10 +64,12 @@ namespace CommandCenter.Model
                 SupportsPushedToLive = true, Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Live).ToList() },
             new TabSettings { Kind = TabKind.ServerStatus, IsPermanent = true, Title = "Server Status", Order = 3 },
             new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = 4 },
-            new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 5 },
+            new TabSettings { Kind = TabKind.MaintenanceVerification, IsPermanent = true, Title = MaintenanceVerificationTabTitle, Order = 5 },
+            new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 6 },
         };
 
         private const string OpToolTabTitle = "OpTool";
+        private const string MaintenanceVerificationTabTitle = "Maintenance Verification";
 
         // Adds the permanent OpTool tab to a settings.json saved before it existed - every
         // existing install already has Tabs populated, so BuildDefaultPermanentTabs never runs for
@@ -92,6 +95,37 @@ namespace CommandCenter.Model
             }
 
             settings.Tabs.Add(new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = order });
+        }
+
+        // Same idempotent "add the permanent tab if a settings.json saved before it existed is
+        // missing it" pattern as EnsureOpToolTab immediately above - see there for the full
+        // reasoning (slots in right before Settings, shifting Settings and anything after it down
+        // one; not persisted here, written out the next time anything saves settings). Runs after
+        // EnsureOpToolTab so a file missing both tabs gets OpTool inserted first, then Maintenance
+        // Verification right after it, matching a fresh install's BuildDefaultPermanentTabs order.
+        private static void EnsureMaintenanceVerificationTab(AppSettings settings)
+        {
+            if (settings.Tabs.Any(t => t.Kind == TabKind.MaintenanceVerification))
+            {
+                return;
+            }
+
+            var settingsTab = settings.Tabs.FirstOrDefault(t => t.Kind == TabKind.Settings);
+            int order = settingsTab?.Order ?? (settings.Tabs.Count == 0 ? 0 : settings.Tabs.Max(t => t.Order) + 1);
+
+            foreach (var tab in settings.Tabs.Where(t => t.Order >= order))
+            {
+                tab.Order++;
+            }
+
+            settings.Tabs.Add(new TabSettings
+            {
+                Kind = TabKind.MaintenanceVerification,
+                IsPermanent = true,
+                Title = MaintenanceVerificationTabTitle,
+                IsVisible = true,
+                Order = order
+            });
         }
 
         // Backfills TabSettings.Servers for every BuildSection tab in a settings.json saved before
