@@ -21,6 +21,7 @@ namespace CommandCenter.Model
         private string _versionNumber = string.Empty;
         private bool _supportsPushedToLive;
         private bool _debugCommandListEnabled;
+        private bool _existingEquipmentCreationEnabled;
         private string? _customIconPath;
         private List<TabServerEntry>? _servers = null;
         private List<TabExecutableEntry> _executables = new();
@@ -131,6 +132,18 @@ namespace CommandCenter.Model
         {
             get => _debugCommandListEnabled;
             set { if (_debugCommandListEnabled != value) { _debugCommandListEnabled = value; OnPropertyChanged(); } }
+        }
+
+        // BuildSection tabs only - the "Existing Equipment Creation" checkbox next to "Enable
+        // Debug Command List" in the Launch panel (see BuildSectionView.xaml /
+        // BuildSectionViewModel.ExistingEquipmentCreationEnabled). Only controls whether the item
+        // picker is shown; ticking items writes straight into the debug command list (and turns
+        // DebugCommandListEnabled on), which is what actually reaches the game. Written directly
+        // by BuildSectionViewModel, same launch-time-toggle pattern as DebugCommandListEnabled.
+        public bool ExistingEquipmentCreationEnabled
+        {
+            get => _existingEquipmentCreationEnabled;
+            set { if (_existingEquipmentCreationEnabled != value) { _existingEquipmentCreationEnabled = value; OnPropertyChanged(); } }
         }
 
         // Absolute path to a user-picked custom tab icon (see Settings' "Change Icon" ->

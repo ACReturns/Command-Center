@@ -168,6 +168,22 @@ namespace CommandCenter.ViewModel
                 DebugCommands.Add(command);
             }
 
+            // "Existing Equipment Creation" item picker (see Model/EquipmentCreationCatalog). Built
+            // after the saved debug list is loaded above so every row's checkbox can start out
+            // ticked for any item whose command is already saved; the CollectionChanged hook keeps
+            // them in step afterwards when the list changes any other way (Add/Import/Edit/Delete).
+            EquipmentTabs = EquipmentCreationCatalog.Tabs.Select(CreateEquipmentTab).ToList();
+            // Skipped while a "Select All" batch is mid-flight (see OnEquipmentItemsBulkToggled) - it
+            // re-syncs once at the end instead of after every single line it adds or removes.
+            DebugCommands.CollectionChanged += (_, _) =>
+            {
+                if (!_isBulkUpdatingEquipment)
+                {
+                    SyncEquipmentSelection();
+                }
+            };
+            SyncEquipmentSelection();
+
             // Rehydrate whichever executable the user picked last time (see
             // TabSettings.LastSelectedExecutable), if it's still one of this tab's enabled options -
             // falls back to the first enabled option for a brand-new tab, or if the remembered one
@@ -558,6 +574,32 @@ namespace CommandCenter.ViewModel
         // so the on-disk copy never drifts from what's shown here).
         public ObservableCollection<string> DebugCommands { get; } = new();
         public bool HasDebugCommands => DebugCommands.Count > 0;
+
+        // The Launch panel's "Existing Equipment Creation" checkbox (next to "Enable Debug Command
+        // List") - shows/hides the item picker (EquipmentTabs below). Persisted immediately on every
+        // toggle, same direct-write pattern as DebugCommandListEnabled above. Toggling it off only
+        // hides the picker - it never touches what's already in the debug command list.
+        public bool ExistingEquipmentCreationEnabled
+        {
+            get => _settings.ExistingEquipmentCreationEnabled;
+            set
+            {
+                if (_settings.ExistingEquipmentCreationEnabled == value)
+                {
+                    return;
+                }
+
+                _settings.ExistingEquipmentCreationEnabled = value;
+                _settingsService.Save(_appSettings);
+                OnPropertyChanged();
+            }
+        }
+
+        // One entry per tab of the equipment sheet (Primary Weapon, Secondary Weapon, Armor,
+        // Accessories, Emblem, Pocket, Misc Items) - built once at construction from
+        // EquipmentCreationCatalog. Every row's checkbox mirrors whether its command is currently
+        // in DebugCommands (see SyncEquipmentSelection / OnEquipmentItemToggled).
+        public IReadOnlyList<EquipmentTabViewModel> EquipmentTabs { get; }
 
         public RelayCommand BrowseSourceCommand { get; }
         public RelayCommand AddAdditionalArchiveCommand { get; }
@@ -1312,6 +1354,143 @@ namespace CommandCenter.ViewModel
         // every Add/Edit/Delete above so the saved copy under AppPaths.DebugCommandsFileFor never
         // drifts from what's shown in the Launch panel.
         private void PersistDebugCommands() => DebugCommandListService.Save(_settings.Id, DebugCommands);
+
+        // Builds one tab of the "Existing Equipment Creation" picker from its catalog definition.
+        // Items are grouped under a header only where the sheet has a category for them (Armor's
+        // class); GroupBy keeps first-appearance order, so the sheet's own ordering is preserved
+        // both between groups and within each one. Items with no category share one header-less group.
+        private EquipmentTabViewModel CreateEquipmentTab(EquipmentTabDefinition definition)
+        {
+            var groups = definition.Items
+                .GroupBy(item => item.Category ?? string.Empty)
+                .Select(group => new EquipmentGroupViewModel(
+                    group.Key.Length == 0 ? null : group.Key,
+                    group.Select(item => new EquipmentItemViewModel(item, OnEquipmentItemToggled)).ToList(),
+                    OnEquipmentItemsBulkToggled))
+                .ToList();
+
+            return new EquipmentTabViewModel(definition.Title, groups, OnEquipmentItemsBulkToggled);
+        }
+
+        // True only while OnEquipmentItemsBulkToggled below is editing DebugCommands, so the
+        // CollectionChanged hook in the constructor doesn't re-sync every row after each single line.
+        private bool _isBulkUpdatingEquipment;
+
+        // A "Select All" checkbox (a whole tab, or one class group on Armor) was clicked. label is the
+        // tab title / group header, only used for the status line. select = true ticks every row in
+        // the batch (adding whichever commands aren't already saved), false unticks them all
+        // (removing every copy of each). Done as ONE batch - every change to DebugCommands first, then
+        // a single re-sync of the checkboxes and a single write of cmd_uidebug.txt - rather than going
+        // through OnEquipmentItemToggled per row. Like ticking a single item, selecting turns "Enable
+        // Debug Command List" on; deselecting leaves it as it is.
+        private void OnEquipmentItemsBulkToggled(string label, IReadOnlyList<EquipmentItemViewModel> items, bool select)
+        {
+            int changed = 0;
+
+            _isBulkUpdatingEquipment = true;
+            try
+            {
+                foreach (EquipmentItemViewModel item in items)
+                {
+                    if (select)
+                    {
+                        if (!DebugCommands.Contains(item.Command))
+                        {
+                            DebugCommands.Add(item.Command);
+                            changed++;
+                        }
+
+                        continue;
+                    }
+
+                    bool removed = false;
+                    while (DebugCommands.Remove(item.Command))
+                    {
+                        removed = true;
+                    }
+
+                    if (removed)
+                    {
+                        changed++;
+                    }
+                }
+            }
+            finally
+            {
+                _isBulkUpdatingEquipment = false;
+            }
+
+            SyncEquipmentSelection();
+
+            if (changed > 0)
+            {
+                PersistDebugCommands();
+            }
+
+            if (select)
+            {
+                DebugCommandListEnabled = true;
+            }
+
+            string scope = string.IsNullOrWhiteSpace(label) ? "this category" : label;
+            string noun = changed == 1 ? "command" : "commands";
+            StatusText = changed == 0
+                ? (select ? $"Everything in {scope} is already in the debug command list." : $"Nothing from {scope} was in the debug command list.")
+                : (select ? $"Added {changed} {noun} from {scope} to the debug command list." : $"Removed {changed} {noun} from {scope} from the debug command list.");
+        }
+
+        // A row's checkbox was ticked/unticked by the user. Ticking adds that item's command to the
+        // debug command list (if it isn't already there), saves the list, and turns "Enable Debug
+        // Command List" on so the updated list is what gets copied into the build folder at launch -
+        // no separate step needed. Unticking removes the command again (every copy of it, in case
+        // the same line was also added by hand) but leaves "Enable Debug Command List" as it is.
+        private void OnEquipmentItemToggled(EquipmentItemViewModel item, bool isSelected)
+        {
+            string command = item.Command;
+
+            if (isSelected)
+            {
+                if (!DebugCommands.Contains(command))
+                {
+                    DebugCommands.Add(command);
+                    PersistDebugCommands();
+                }
+
+                DebugCommandListEnabled = true;
+                StatusText = $"Added {item.Name} to the debug command list.";
+                return;
+            }
+
+            bool removed = false;
+            while (DebugCommands.Remove(command))
+            {
+                removed = true;
+            }
+
+            if (removed)
+            {
+                PersistDebugCommands();
+                StatusText = $"Removed {item.Name} from the debug command list.";
+            }
+        }
+
+        // Re-ticks/unticks every picker row to match what's actually saved in DebugCommands right
+        // now - called once at construction and again whenever the list changes for any reason
+        // (Add/Import/Edit/Delete here, or a row toggle above), so deleting a line in the list
+        // editor unticks its row and importing a list that contains one ticks it. Uses SyncSelected
+        // so this never re-enters OnEquipmentItemToggled.
+        private void SyncEquipmentSelection()
+        {
+            var saved = new HashSet<string>(DebugCommands);
+
+            foreach (EquipmentTabViewModel tab in EquipmentTabs)
+            {
+                foreach (EquipmentItemViewModel item in tab.AllItems)
+                {
+                    item.SyncSelected(saved.Contains(item.Command));
+                }
+            }
+        }
 
         // Recomputes where this section's Documents folder should be (a sibling of
         // CurrentBuildPath, named from VersionNumber's family or SectionTitle - see

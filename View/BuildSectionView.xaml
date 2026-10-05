@@ -180,7 +180,95 @@
                      entries themselves are saved under AppData regardless of this checkbox - it
                      only controls whether this editor is shown and whether Launch Build copies
                      the file into the build folder (see BuildSectionViewModel.Launch). -->
-                <CheckBox Content="Enable Debug Command List" IsChecked="{Binding DebugCommandListEnabled}" Margin="0,16,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                    <CheckBox Content="Enable Debug Command List" IsChecked="{Binding DebugCommandListEnabled}" VerticalAlignment="Center"/>
+
+                    <!-- Existing Equipment Creation: shows the item picker just below (one tab per
+                         tab of "MS - Equip Creation v2.1.xlsx"). Only controls whether the picker
+                         is visible - see BuildSectionViewModel.ExistingEquipmentCreationEnabled. -->
+                    <CheckBox Content="Existing Equipment Creation" IsChecked="{Binding ExistingEquipmentCreationEnabled}"
+                              VerticalAlignment="Center" Margin="24,0,0,0"
+                              ToolTip="Pick existing items from the equipment sheet to add their create commands to the debug command list."/>
+                </StackPanel>
+
+                <!-- Existing Equipment Creation picker. Sits ABOVE the debug command editor on
+                     purpose: ticking an item turns "Enable Debug Command List" on, which reveals
+                     the editor - with the picker first, that reveal happens below the cursor
+                     instead of shifting the list being clicked. Each row's checkbox adds that
+                     item's command to the debug command list (unticking removes it), and is kept in
+                     sync with the saved list - see BuildSectionViewModel.OnEquipmentItemToggled /
+                     SyncEquipmentSelection. Items are grouped under a header only where the sheet
+                     has a category for them (Armor by class); everything else is a flat list per
+                     tab. -->
+                <StackPanel Visibility="{Binding ExistingEquipmentCreationEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
+                    <TextBlock Text="Existing Equipment Creation" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                    <TextBlock Text="Tick an item to add its create command to the debug command list (this also turns the list on). Untick to remove it. Equipment is created Legendary with 3 potential lines and 3 bonus potential lines, same as the sheet's default."
+                               Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                    <TabControl ItemsSource="{Binding EquipmentTabs}">
+                        <TabControl.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Title}"/>
+                            </DataTemplate>
+                        </TabControl.ItemTemplate>
+                        <TabControl.ContentTemplate>
+                            <DataTemplate>
+                              <DockPanel>
+                                <!-- Select All for the whole tab. Pinned above the scrolling list so it
+                                     stays reachable however long the tab is. Shows the mixed state when
+                                     only some rows are ticked; a click always means "tick everything
+                                     that isn't" (or untick all, if everything already is) - see
+                                     EquipmentSelectionScope.ToggleAllCommand. IsChecked is OneWay on
+                                     purpose: the command, not a binding setter, changes the rows, and
+                                     the resulting AllSelected notification redraws the box. -->
+                                <CheckBox DockPanel.Dock="Top" Content="Select All" FontWeight="SemiBold" Margin="8,4,0,2"
+                                          IsChecked="{Binding AllSelected, Mode=OneWay}"
+                                          Command="{Binding ToggleAllCommand}"/>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="220" Padding="6,2">
+                                    <ItemsControl ItemsSource="{Binding Groups}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <StackPanel Margin="0,0,0,6">
+                                                    <!-- Category header (Armor's class) with its own Select All, so
+                                                         one class can be grabbed without the rest of the tab. Hidden
+                                                         for header-less groups, where the tab's Select All above
+                                                         already covers exactly the same rows. -->
+                                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,2"
+                                                                Visibility="{Binding HasHeader, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding Header}" FontWeight="Bold" VerticalAlignment="Center"/>
+                                                        <CheckBox Content="Select All" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center"
+                                                                  IsChecked="{Binding AllSelected, Mode=OneWay}"
+                                                                  Command="{Binding ToggleAllCommand}"/>
+                                                    </StackPanel>
+                                                    <ItemsControl ItemsSource="{Binding Items}">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2" ToolTip="{Binding Command}">
+                                                                    <!-- Two lines: the item's name (plus its type, where the sheet
+                                                                         has one) on top, its item ID directly beneath, so it's clear
+                                                                         which item an ID is. -->
+                                                                    <StackPanel>
+                                                                        <StackPanel Orientation="Horizontal">
+                                                                            <TextBlock Text="{Binding Name}"/>
+                                                                            <TextBlock Text="{Binding Detail, StringFormat=' - {0}'}" Margin="2,0,0,0" Foreground="#FF666666"
+                                                                                       Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}"/>
+                                                                        </StackPanel>
+                                                                        <TextBlock Text="{Binding ItemIdDisplay, StringFormat='Item ID: {0}'}" FontSize="11" Foreground="#FF888888"/>
+                                                                    </StackPanel>
+                                                                </CheckBox>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                              </DockPanel>
+                            </DataTemplate>
+                        </TabControl.ContentTemplate>
+                    </TabControl>
+                </StackPanel>
 
                 <StackPanel Visibility="{Binding DebugCommandListEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
                     <TextBlock Text="Debug Commands" FontWeight="SemiBold" Margin="0,0,0,2"/>
