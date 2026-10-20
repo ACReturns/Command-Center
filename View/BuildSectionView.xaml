@@ -4,12 +4,22 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="620">
-    <Grid Margin="16">
+    <!-- Outer layout: everything scrolls EXCEPT the progress/status strip at the bottom, which is
+         pinned so a running New Build/Patch/Pushed to Live is always visible no matter how far
+         down the content runs or how small the window is. (The ScrollViewer used to wrap this
+         whole view from MainWindow.xaml, which let the progress bar end up below the fold.) -->
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+    <ScrollViewer Grid.Row="0" x:Name="ContentScroller" VerticalScrollBarVisibility="Auto">
+    <Grid Margin="16,16,16,4">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
@@ -350,16 +360,22 @@
             </StackPanel>
         </Border>
 
+    </Grid>
+    </ScrollViewer>
+
+    <!-- Pinned footer: thin divider so it reads as separate from the scrolling content above. -->
+    <Border Grid.Row="1" BorderBrush="#FFD0D0D0" BorderThickness="0,1,0,0"/>
+
         <!-- Progress / status: runs in the background now, so this section (and every other tab,
              and the window itself) stays fully usable while it's visible. Cancel lets you back out
              without waiting it out. -->
-        <StackPanel Grid.Row="4" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
+        <StackPanel Grid.Row="1" Margin="16,8,16,12" Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}">
             <ProgressBar Height="18" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"/>
             <DockPanel Margin="0,4,0,0">
                 <Button Content="Cancel" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding CancelUpdateCommand}"/>
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center"/>
             </DockPanel>
         </StackPanel>
-        <TextBlock Grid.Row="4" Text="{Binding StatusText}" Margin="0,12,0,0" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
+        <TextBlock Grid.Row="1" Text="{Binding StatusText}" Margin="16,8,16,12" TextWrapping="Wrap" Visibility="{Binding IsBusy, Converter={StaticResource InverseBoolToVis}}"/>
     </Grid>
 </UserControl>

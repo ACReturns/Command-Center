@@ -1,3 +1,4 @@
+using System;
 using System.Diagnostics;
 
 namespace CommandCenter.Model
@@ -24,6 +25,7 @@ namespace CommandCenter.Model
             ServerDisplayName = serverDisplayName;
             VersionNumber = versionNumber;
             ExecutableName = executableName;
+            LaunchedAt = DateTime.Now;
         }
 
         public Process Process { get; }
@@ -36,5 +38,9 @@ namespace CommandCenter.Model
         public string ServerDisplayName { get; }
         public string VersionNumber { get; }
         public string ExecutableName { get; }
+
+        // When Command Center started this client - used to detect a client that quits within a
+        // few seconds of launch (see ActiveClientsViewModel's early-exit notice).
+        public DateTime LaunchedAt { get; }
     }
 }

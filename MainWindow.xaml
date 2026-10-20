@@ -113,10 +113,10 @@
         <TabControl Grid.Row="1" Grid.ColumnSpan="2" Margin="6,6,6,6"
                     ItemsSource="{Binding TabsView}" SelectedItem="{Binding SelectedTab}">
             <TabControl.Resources>
+                <!-- BuildSectionView owns its own ScrollViewer now so its progress/status strip can
+                     stay pinned at the bottom instead of scrolling out of view. -->
                 <DataTemplate DataType="{x:Type ViewModel:BuildSectionViewModel}">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <View:BuildSectionView/>
-                    </ScrollViewer>
+                    <View:BuildSectionView/>
                 </DataTemplate>
                 <DataTemplate DataType="{x:Type ViewModel:ServerStatusViewModel}">
                     <View:ServerStatusView/>

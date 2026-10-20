@@ -26,9 +26,17 @@
                         </TextBlock>
                     </StackPanel>
 
-                    <Button Grid.Column="1" Content="Close" Padding="12,5" VerticalAlignment="Center"
-                            Command="{Binding DataContext.CloseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                            CommandParameter="{Binding}"/>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Restores/activates the client window and pulls it onto this monitor if it's
+                             on another screen or off-screen - see WindowActivator. -->
+                        <Button Content="Bring to Front" Padding="12,5" Margin="0,0,8,0"
+                                ToolTip="Show this client's window and move it to this screen if it's on another monitor"
+                                Command="{Binding DataContext.BringToFrontCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}"/>
+                        <Button Content="Close" Padding="12,5"
+                                Command="{Binding DataContext.CloseCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                CommandParameter="{Binding}"/>
+                    </StackPanel>
                 </Grid>
             </Border>
         </DataTemplate>
