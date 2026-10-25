@@ -24,6 +24,17 @@ namespace CommandCenter.Services
     public sealed record DriveFolderEntry(string Id, string Name, string? ModifiedHint = null);
 
     /// <summary>
+    /// One child of a Drive folder with its type known - used by the Build Repo tab, which has to
+    /// tell folders (versions/builds/subfolders) apart from downloadable files. IsFolder comes from
+    /// Drive's own mimeType when it was available (the folder page's embedded _DRIVE_ivd data), and
+    /// otherwise from a "name has no file extension" guess (see ListFolderItemsAsync).
+    /// </summary>
+    public sealed record DriveItem(string Id, string Name, bool IsFolder, bool TypeIsGuessed);
+
+    /// <summary>Bytes received so far + total (null when Drive didn't send a length).</summary>
+    public readonly record struct DriveDownloadProgress(long BytesReceived, long? TotalBytes);
+
+    /// <summary>
     /// Talks to Google through an embedded Edge (WebView2) profile stored under
     /// %LocalAppData%\CommandCenter\WebView2. The user signs in once via GoogleSignInWindow
     /// (normal work SSO); the cookies persist in that profile, and everything after that runs
@@ -95,7 +106,63 @@ namespace CommandCenter.Services
     };
 }).filter(x => x.id)))()";
 
+        // Build Repo listing. Primary source: window._DRIVE_ivd - the folder page's own embedded
+        // initial-listing data (the same thing gdown parses), a JSON array whose first element is the
+        // list of children, each [id, [parents], name, mimeType, ...]. It carries the real mimeType, so
+        // folder-vs-file is exact. Secondary source: the rendered div[role=row][data-id] rows, merged
+        // in for anything _DRIVE_ivd didn't include - those only get a guessed type (no extension =
+        // folder). Name for DOM-only rows: first leaf text in the row that isn't a date/size/owner.
+        private const string ListFolderItemsScript = @"
+(() => {
+    const out = new Map();
+    let ivdFound = false;
+    try {
+        const raw = window['_DRIVE_ivd'];
+        if (typeof raw === 'string' && raw.length > 0) {
+            const arr = JSON.parse(raw);
+            const items = (Array.isArray(arr) && Array.isArray(arr[0])) ? arr[0] : [];
+            ivdFound = true;
+            for (const f of items) {
+                if (!Array.isArray(f) || typeof f[0] !== 'string') continue;
+                out.set(f[0], {
+                    id: f[0],
+                    name: typeof f[2] === 'string' ? f[2] : '',
+                    mime: typeof f[3] === 'string' ? f[3] : ''
+                });
+            }
+        }
+    } catch (e) { }
+    const junk = /^(me|owner|—|-|\d+(\.\d+)?\s*(bytes|KB|MB|GB|TB))$/i;
+    const dateLike = /(\d{1,2}\/\d{1,2}\/\d{2,4})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-zA-Z]*\.?\s+\d{1,2}(,?\s+\d{4})?)|(\d{1,2}:\d{2}\s*(AM|PM)?)|(\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago)/i;
+    for (const row of document.querySelectorAll('div[role=""row""][data-id]')) {
+        const id = row.getAttribute('data-id');
+        if (!id || out.has(id)) continue;
+        const leaves = Array.from(row.querySelectorAll('*'))
+            .filter(n => n.children.length === 0)
+            .map(n => (n.textContent || '').trim())
+            .filter(t => t.length > 0 && t.length < 200 && !junk.test(t) && !dateLike.test(t));
+        const withExt = leaves.find(t => /\.[A-Za-z0-9]{2,5}$/.test(t));
+        out.set(id, { id: id, name: withExt || leaves[0] || (row.getAttribute('aria-label') || '').trim(), mime: '' });
+    }
+    return JSON.stringify({ ivd: ivdFound, items: Array.from(out.values()) });
+})()";
+
+        private const string FolderMimeType = "application/vnd.google-apps.folder";
+
         private GoogleWebSession() { }
+
+        public static bool IsDriveFolderPage(string? url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Host.Equals("drive.google.com", StringComparison.OrdinalIgnoreCase)
+            && uri.AbsolutePath.Contains("/folders/", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Direct-download URL that skips Drive's "can't scan this file for viruses" interstitial for
+        /// large files (confirm=t). Cookies from the signed-in WebView2 profile ride along, so this
+        /// works for files shared only with the signed-in account too.
+        /// </summary>
+        public static string DriveLargeFileDownloadUrl(string fileId) =>
+            $"https://drive.usercontent.google.com/download?id={Uri.EscapeDataString(fileId)}&export=download&confirm=t";
 
         /// <summary>Shared by the hidden controller and the visible sign-in window so they use the same cookies.</summary>
         public Task<CoreWebView2Environment> GetEnvironmentAsync()
@@ -327,6 +394,265 @@ namespace CommandCenter.Services
             return JsonSerializer.Deserialize<List<DriveFolderEntry>>(inner,
                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
                    ?? new List<DriveFolderEntry>();
+        }
+
+        /// <summary>
+        /// Lists a Drive folder's children WITH folder/file type (Build Repo tab). Always uses the real,
+        /// authenticated Drive folder page (works for folders shared only with specific accounts).
+        /// Throws SignInRequiredException if Google redirects to a login page.
+        /// </summary>
+        public async Task<List<DriveItem>> ListFolderItemsAsync(string folderId, CancellationToken ct)
+        {
+            await _gate.WaitAsync(ct);
+            CoreWebView2? web = null;
+            var navigated = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
+            void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e) => navigated.TrySetResult(e);
+
+            try
+            {
+                web = await GetHiddenWebViewAsync();
+                web.NavigationCompleted += OnNavigationCompleted;
+                web.Navigate($"https://drive.google.com/drive/folders/{Uri.EscapeDataString(folderId)}");
+
+                var finished = await Task.WhenAny(navigated.Task, Task.Delay(OperationTimeout, ct));
+                if (finished != navigated.Task)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new TimeoutException("Google Drive didn't respond within 60 seconds.");
+                }
+
+                var result = await navigated.Task;
+                if (!result.IsSuccess)
+                {
+                    throw new IOException($"Couldn't open the Drive folder ({result.WebErrorStatus}).");
+                }
+
+                if (!Uri.TryCreate(web.Source, UriKind.Absolute, out var landed)
+                    || !landed.Host.Equals("drive.google.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new SignInRequiredException();
+                }
+
+                // _DRIVE_ivd is set by an inline script, so it's normally there right at
+                // NavigationCompleted - but the DOM rows (fallback/merge source) render a bit later,
+                // and an empty folder legitimately has neither. Poll a few times: stop as soon as
+                // _DRIVE_ivd has been read (authoritative, even when it says "empty"), or rows appear.
+                List<DriveItem> items = new();
+                for (var attempt = 0; attempt < 10; attempt++)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var (ivdFound, parsed) = ParseFolderItems(await web.ExecuteScriptAsync(ListFolderItemsScript));
+                    items = parsed;
+                    if (ivdFound && attempt >= 2) break; // give the DOM a moment to add anything ivd missed
+                    if (!ivdFound && items.Count > 0) break;
+
+                    await Task.Delay(400, ct);
+                }
+
+                return items;
+            }
+            finally
+            {
+                if (web != null)
+                {
+                    web.NavigationCompleted -= OnNavigationCompleted;
+                }
+
+                _gate.Release();
+            }
+        }
+
+        private static (bool IvdFound, List<DriveItem> Items) ParseFolderItems(string json)
+        {
+            var inner = JsonSerializer.Deserialize<string>(json) ?? "{}";
+            using var doc = JsonDocument.Parse(inner);
+            var root = doc.RootElement;
+            var ivdFound = root.TryGetProperty("ivd", out var ivd) && ivd.ValueKind == JsonValueKind.True;
+            var items = new List<DriveItem>();
+
+            if (root.TryGetProperty("items", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var el in arr.EnumerateArray())
+                {
+                    var id = el.TryGetProperty("id", out var idEl) ? idEl.GetString() : null;
+                    var name = (el.TryGetProperty("name", out var nameEl) ? nameEl.GetString() : null)?.Trim();
+                    var mime = el.TryGetProperty("mime", out var mimeEl) ? mimeEl.GetString() : null;
+                    if (string.IsNullOrEmpty(id) || string.IsNullOrEmpty(name)) continue;
+
+                    // Shortcuts point somewhere else entirely - not something we can list/download here.
+                    if (mime != null && mime.EndsWith(".shortcut", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    if (!string.IsNullOrEmpty(mime))
+                    {
+                        items.Add(new DriveItem(id, name, mime == FolderMimeType, TypeIsGuessed: false));
+                    }
+                    else
+                    {
+                        items.Add(new DriveItem(id, name, !HasFileExtension(name), TypeIsGuessed: true));
+                    }
+                }
+            }
+
+            return (ivdFound, items);
+        }
+
+        // "Full_Client.zip" -> true, "v271.4.0" / "v271.4.0 (Minor Patch)" / "1TC" -> false.
+        // Extension = a final ".xxx" of 2-5 characters with at least one letter, so version-style
+        // names ending in ".0" or ".10" don't count.
+        public static bool HasFileExtension(string name)
+        {
+            var dot = name.LastIndexOf('.');
+            if (dot < 0 || dot == name.Length - 1) return false;
+            var ext = name.Substring(dot + 1);
+            if (ext.Length < 2 || ext.Length > 5) return false;
+            var hasLetter = false;
+            foreach (var c in ext)
+            {
+                if (!char.IsLetterOrDigit(c)) return false;
+                if (char.IsLetter(c)) hasLetter = true;
+            }
+            return hasLetter;
+        }
+
+        /// <summary>
+        /// Downloads one (possibly multi-GB) Drive file to <paramref name="destinationPath"/> with
+        /// byte progress. Unlike DownloadAsync this has no overall time limit - only a limit on how long
+        /// Google takes to START sending the file - and runs in its own short-lived hidden WebView2
+        /// (same profile/cookies), so it doesn't hold the shared gate for the whole transfer and the
+        /// Build Repo tree / Maintenance tab stay usable while it runs. Writes to a .part file first.
+        /// </summary>
+        public async Task DownloadLargeFileAsync(string fileId, string destinationPath, IProgress<DriveDownloadProgress>? progress, CancellationToken ct)
+        {
+            CoreWebView2Controller? controller = null;
+            CoreWebView2? web = null;
+            CoreWebView2DownloadOperation? operation = null;
+            var partPath = destinationPath + ".part";
+            var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var triedInterstitial = false;
+            var triedFallbackUrl = false;
+
+            void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
+            {
+                e.ResultFilePath = partPath;
+                e.Handled = true;
+                operation = e.DownloadOperation;
+                downloadStarted.TrySetResult(true);
+
+                operation.BytesReceivedChanged += (_, _) =>
+                {
+                    var total = (long?)operation.TotalBytesToReceive;
+                    progress?.Report(new DriveDownloadProgress(operation.BytesReceived, total is > 0 ? total : null));
+                };
+                operation.StateChanged += (_, _) =>
+                {
+                    if (operation.State == CoreWebView2DownloadState.Completed)
+                        done.TrySetResult(true);
+                    else if (operation.State == CoreWebView2DownloadState.Interrupted)
+                        done.TrySetException(new IOException($"Download interrupted ({operation.InterruptReason})."));
+                };
+            }
+
+            async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+            {
+                try
+                {
+                    if (downloadStarted.Task.IsCompleted) return;
+                    await Task.Delay(NoDownloadGrace);
+                    if (downloadStarted.Task.IsCompleted || web == null) return;
+
+                    if (!e.IsSuccess)
+                    {
+                        done.TrySetException(new IOException($"Couldn't reach Google ({e.WebErrorStatus})."));
+                        return;
+                    }
+
+                    if (Uri.TryCreate(web.Source, UriKind.Absolute, out var landed)
+                        && landed.Host.Contains("accounts.google", StringComparison.OrdinalIgnoreCase))
+                    {
+                        done.TrySetException(new SignInRequiredException());
+                        return;
+                    }
+
+                    // Drive's "file too large to scan" interstitial is a form with a Download anyway
+                    // button - submit it once and let DownloadStarting take over.
+                    if (!triedInterstitial)
+                    {
+                        triedInterstitial = true;
+                        var submitted = await web.ExecuteScriptAsync(
+                            "(() => { const f = document.querySelector('#download-form') || document.querySelector('form[action*=\"download\"]'); if (f) { f.submit(); return true; } return false; })()");
+                        if (submitted == "true") return; // a new navigation/download follows
+                    }
+
+                    // Last resort before blaming sign-in: the classic uc?export=download endpoint
+                    // (what the Maintenance tab's .md5 download already uses successfully).
+                    if (!triedFallbackUrl)
+                    {
+                        triedFallbackUrl = true;
+                        triedInterstitial = false; // that endpoint can show its own interstitial too
+                        web.Navigate(DriveFileDownloadUrl(fileId));
+                        return;
+                    }
+
+                    done.TrySetException(new SignInRequiredException()); // a page rendered instead of a file
+                }
+                catch (Exception ex)
+                {
+                    done.TrySetException(ex);
+                }
+            }
+
+            using var cancelReg = ct.Register(() =>
+            {
+                try { operation?.Cancel(); } catch { }
+                done.TrySetCanceled(ct);
+            });
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                if (File.Exists(partPath)) File.Delete(partPath);
+
+                var environment = await GetEnvironmentAsync();
+                var owner = Application.Current?.MainWindow
+                            ?? throw new InvalidOperationException("Main window isn't available yet.");
+                var hwnd = new WindowInteropHelper(owner).EnsureHandle();
+                controller = await environment.CreateCoreWebView2ControllerAsync(hwnd);
+                controller.IsVisible = false;
+                web = controller.CoreWebView2;
+                web.Settings.AreDefaultScriptDialogsEnabled = false;
+                web.DownloadStarting += OnDownloadStarting;
+                web.NavigationCompleted += OnNavigationCompleted;
+                web.Navigate(DriveLargeFileDownloadUrl(fileId));
+
+                // Only the START is time-limited; once bytes are flowing, wait as long as it takes.
+                var first = await Task.WhenAny(downloadStarted.Task, done.Task, Task.Delay(OperationTimeout, ct));
+                if (first != downloadStarted.Task && first != done.Task)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    throw new TimeoutException("Google didn't start the download within 60 seconds.");
+                }
+
+                await done.Task; // rethrows SignInRequired / IOException / cancellation
+                File.Move(partPath, destinationPath, overwrite: true);
+            }
+            finally
+            {
+                if (web != null)
+                {
+                    web.DownloadStarting -= OnDownloadStarting;
+                    web.NavigationCompleted -= OnNavigationCompleted;
+                }
+
+                if (operation != null && operation.State == CoreWebView2DownloadState.InProgress)
+                {
+                    try { operation.Cancel(); } catch { }
+                }
+
+                controller?.Close();
+                try { if (File.Exists(partPath)) File.Delete(partPath); } catch { }
+            }
         }
 
         /// <summary>

@@ -344,6 +344,7 @@ namespace CommandCenter.ViewModel
                 TabKind.ServerStatus => ServerStatus,
                 TabKind.OpTool => OpTool,
                 TabKind.MaintenanceVerification => new MaintenanceVerificationViewModel(_appSettings, _settingsService, () => _appSettings.Tabs),
+                TabKind.BuildRepo => new BuildRepoViewModel(_appSettings, _settingsService, () => _appSettings.Tabs, FindBuildSection),
                 TabKind.Settings => Settings,
                 _ => throw new InvalidOperationException($"Unknown tab kind: {settings.Kind}")
             };
@@ -356,6 +357,11 @@ namespace CommandCenter.ViewModel
 
             return new TabInfo(settings, content);
         }
+
+        // Lets the Build Repo tab check whether a target tab is mid-update before extracting into it,
+        // and nudge its storage tracker afterward.
+        private BuildSectionViewModel? FindBuildSection(Guid tabId) =>
+            Tabs.FirstOrDefault(t => t.Settings.Id == tabId)?.Content as BuildSectionViewModel;
 
         // A client was just launched from some BuildSectionViewModel's Launch panel - make sure the
         // Active Clients tab exists (first launch since it was last empty), then track this one.

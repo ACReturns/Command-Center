@@ -16,7 +16,7 @@
                            Foreground="Black"
                            TextWrapping="Wrap"
                            Margin="0,0,10,0"
-                           Text="Sign in with your work Google account. This window closes on its own once the version sheet opens."/>
+                           Text="Sign in with your work Google account. This window closes on its own once the Google page (sheet or Drive folder) opens."/>
             </DockPanel>
         </Border>
         <wv2:WebView2 x:Name="Web"/>

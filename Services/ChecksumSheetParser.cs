@@ -60,9 +60,18 @@ namespace CommandCenter.Services
             return rows;
         }
 
-        /// <summary>"v271.3.0" and "271.3.0" compare equal. Tab version numbers are entered in the same order as the sheet.</summary>
-        public static string NormalizeVersion(string? version) =>
-            (version ?? string.Empty).Trim().TrimStart('v', 'V');
+        /// <summary>
+        /// "v271.3.0", "271.3.0" and "271.3.0 (1TC)" all compare equal. The trailing " (...)" label is
+        /// what the Build Repo tab appends (the build a tab's files came from - see
+        /// BuildRepoDefaults.VersionLabel); it's ignored here so those tabs still match their sheet row.
+        /// </summary>
+        public static string NormalizeVersion(string? version)
+        {
+            var text = (version ?? string.Empty).Trim();
+            var paren = text.IndexOf(" (", StringComparison.Ordinal);
+            if (paren > 0) text = text.Substring(0, paren);
+            return text.Trim().TrimStart('v', 'V');
+        }
 
         public static bool TryParseSheetUrl(string? url, out string sheetId, out string gid)
         {

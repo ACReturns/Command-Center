@@ -53,6 +53,78 @@ namespace CommandCenter.Services
             return RunOnBackgroundThreadAsync(sourceArchivePath, destinationBuildPath, mode, progress, cancellationToken);
         }
 
+        /// <summary>
+        /// Patch from an already-downloaded FOLDER instead of an archive (Build Repo tab). Runs the
+        /// exact same Patch pipeline RunAsync does once an archive has been extracted - FindContentRoot,
+        /// ResolvePartialClientPayloadAsync (keep only the Partial / "Partial Client N" payload, merge
+        /// numbered folders in order, unwrap nested archives at any depth, drop extras like
+        /// checksums.md5), overwrite-copy into the build folder, then FlattenKnownWrapperFolders - so a
+        /// build downloaded from Drive lands exactly as if its folder had been zipped up and applied
+        /// with the build tab's own Patch button.
+        ///
+        /// CONSUMES <paramref name="sourceFolder"/>: it's moved (same drive, instant) into a scratch work
+        /// folder next to it, which plays the role RunAsync's extraction temp dir does, and is deleted
+        /// afterward whether the patch succeeds or fails.
+        /// </summary>
+        public static Task RunPatchFromFolderAsync(string sourceFolder, string destinationBuildPath, IProgress<UpdateProgress> progress, CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(sourceFolder) || !Directory.Exists(sourceFolder))
+            {
+                throw new DirectoryNotFoundException($"Downloaded build folder not found: {sourceFolder}");
+            }
+
+            if (string.IsNullOrWhiteSpace(destinationBuildPath))
+            {
+                throw new InvalidOperationException("No build path is configured for this section. Set it in the Settings tab first.");
+            }
+
+            return Task.Run(async () =>
+            {
+                string trimmed = sourceFolder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string workDir = trimmed + "__work_" + Guid.NewGuid().ToString("N");
+                Directory.CreateDirectory(workDir);
+
+                try
+                {
+                    progress.Report(new UpdateProgress("Preparing downloaded files...", 5));
+                    Directory.Move(trimmed, Path.Combine(workDir, Path.GetFileName(trimmed)));
+
+                    // Same as RunOnBackgroundThreadAsync from here on: workDir == its tempDir.
+                    string contentRoot = FindContentRoot(workDir);
+                    Directory.CreateDirectory(destinationBuildPath);
+
+                    contentRoot = await ResolvePartialClientPayloadAsync(workDir, contentRoot, progress, cancellationToken).ConfigureAwait(false);
+
+                    CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
+
+                    progress.Report(new UpdateProgress("Finalizing build folder...", 97));
+                    FlattenKnownWrapperFolders(destinationBuildPath, progress, cancellationToken);
+
+                    progress.Report(new UpdateProgress("Done", 100));
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    string diagnostics = DescribeTempDirForDiagnostics(workDir);
+                    throw new IOException(ex.Message + diagnostics, ex);
+                }
+                finally
+                {
+                    try { Directory.Delete(workDir, recursive: true); } catch { /* best-effort cleanup */ }
+                }
+            }, cancellationToken);
+        }
+
+        /// <summary>
+        /// Whether a downloaded folder still has anything worth patching with - i.e. any file other than
+        /// checksum lists (.md5). Used by the Build Repo tab after a Full_* archive has been applied and
+        /// removed, so a build that was ONLY a Full_* archive (+ its checksums) doesn't run a pointless
+        /// Patch that would copy a stray checksums.md5 into the build folder.
+        /// </summary>
+        public static bool HasPatchContent(string folder) =>
+            Directory.Exists(folder)
+            && Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
+                .Any(f => !string.Equals(Path.GetExtension(f), ".md5", StringComparison.OrdinalIgnoreCase));
+
         private static async Task RunOnBackgroundThreadAsync(string sourceArchivePath, string destinationBuildPath, UpdateMode mode, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
         {
             await Task.Run(async () =>

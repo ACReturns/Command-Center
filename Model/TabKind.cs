@@ -17,6 +17,7 @@ namespace CommandCenter.Model
         Settings,
         ActiveClients,
         OpTool,
-        MaintenanceVerification
+        MaintenanceVerification,
+        BuildRepo
     }
 }

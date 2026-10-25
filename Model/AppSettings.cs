@@ -109,6 +109,18 @@ namespace CommandCenter.Model
         // just deserializes it to false, matching prior behavior exactly.
         public bool MaintenanceNewestFirst { get; set; } = false;
 
+        // Root Google Drive folder the Build Repo tab lists versions from (each version folder holds
+        // a "Build" subfolder whose children are the downloadable builds - see BuildRepoDefaults /
+        // BuildRepoViewModel). Falls back to BuildRepoDefaults.RootFolderUrl if blank. An existing
+        // settings.json without this key just deserializes it to the default.
+        public string BuildRepoFolderUrl { get; set; } = BuildRepoDefaults.RootFolderUrl;
+
+        // Build Repo tab's "Extract after download" checkbox - remembered between sessions.
+        public bool BuildRepoExtractAfterDownload { get; set; } = false;
+
+        // Build Repo tab's last-picked "Download for tab" target (TabSettings.Id), restored on launch.
+        public Guid? BuildRepoLastTargetTabId { get; set; }
+
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
         // resets these to empty immediately after migrating them into Tabs once.

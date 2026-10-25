@@ -416,6 +416,34 @@ namespace CommandCenter.ViewModel
 
         public bool IsNotBusy => !IsBusy;
 
+        // ---- Build Repo tab extracting into this tab's build folder ----
+        // Marks this tab busy (so its own New Build/Patch/Launch can't run mid-extraction) and mirrors
+        // the Build Repo tab's progress here, so switching to this tab shows what's happening.
+        public void BeginExternalUpdate(string status)
+        {
+            IsBusy = true;
+            ProgressPercent = 0;
+            StatusText = status;
+        }
+
+        public void ReportExternalProgress(double percent, string status)
+        {
+            ProgressPercent = percent;
+            StatusText = status;
+        }
+
+        public void EndExternalUpdate(string status, bool succeeded)
+        {
+            IsBusy = false;
+            StatusText = status;
+            OnPropertyChanged(nameof(HasBuildPath));
+            OnPropertyChanged(nameof(IsSelectedExecutableMissing));
+            if (succeeded)
+            {
+                DiskSpaceStatusChanged?.Invoke(this, DiskSpaceService.CheckDiskSpace(CurrentBuildPath));
+            }
+        }
+
         public double ProgressPercent
         {
             get => _progressPercent;

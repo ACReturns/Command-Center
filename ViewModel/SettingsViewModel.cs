@@ -23,6 +23,7 @@ namespace CommandCenter.ViewModel
         private bool _isDirty;
         private bool _runAsAdministrator;
         private string _maintenanceSheetUrl = string.Empty;
+        private string _buildRepoFolderUrl = string.Empty;
 
         // onTabsCommitted is called after Save() has already updated _appSettings.Tabs in place
         // and persisted it - MainViewModel uses it to reconcile its live Tabs/TabInfo collection
@@ -79,6 +80,20 @@ namespace CommandCenter.ViewModel
             set
             {
                 if (SetProperty(ref _maintenanceSheetUrl, value))
+                {
+                    IsDirty = true;
+                }
+            }
+        }
+
+        // Editable "Build Repo Drive folder URL" - same draft pattern as MaintenanceSheetUrl above.
+        // Blank on save resets it to BuildRepoDefaults.RootFolderUrl.
+        public string BuildRepoFolderUrl
+        {
+            get => _buildRepoFolderUrl;
+            set
+            {
+                if (SetProperty(ref _buildRepoFolderUrl, value))
                 {
                     IsDirty = true;
                 }
@@ -192,6 +207,9 @@ namespace CommandCenter.ViewModel
             _maintenanceSheetUrl = _appSettings.MaintenanceSheetUrl;
             OnPropertyChanged(nameof(MaintenanceSheetUrl));
 
+            _buildRepoFolderUrl = _appSettings.BuildRepoFolderUrl;
+            OnPropertyChanged(nameof(BuildRepoFolderUrl));
+
             IsDirty = false;
         }
 
@@ -284,6 +302,9 @@ namespace CommandCenter.ViewModel
             _appSettings.MaintenanceSheetUrl = string.IsNullOrWhiteSpace(MaintenanceSheetUrl)
                 ? MaintenanceDefaults.SheetUrl
                 : MaintenanceSheetUrl.Trim();
+            _appSettings.BuildRepoFolderUrl = string.IsNullOrWhiteSpace(BuildRepoFolderUrl)
+                ? BuildRepoDefaults.RootFolderUrl
+                : BuildRepoFolderUrl.Trim();
             _settingsService.Save(_appSettings);
 
             // Clear IsDirty (via LoadDraftFromLive) BEFORE notifying MainViewModel of the commit.
