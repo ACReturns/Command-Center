@@ -64,6 +64,11 @@ namespace CommandCenter.ViewModel
             ServerStatus = new ServerStatusViewModel(_appSettings, _settingsService);
             OpTool = new OpToolViewModel();
 
+            // Created before any tab so its dropdown can follow Tabs as it fills (it listens to
+            // Tabs.CollectionChanged) - see LauncherViewModel.
+            Launcher = new LauncherViewModel(Tabs, _appSettings, _settingsService);
+            Launcher.PropertyChanged += Launcher_PropertyChanged;
+
             foreach (var tabSettings in _appSettings.Tabs.OrderBy(t => t.Order))
             {
                 Tabs.Add(CreateTabInfo(tabSettings));
@@ -101,6 +106,7 @@ namespace CommandCenter.ViewModel
         public SettingsViewModel Settings { get; }
         public ServerStatusViewModel ServerStatus { get; }
         public OpToolViewModel OpTool { get; }
+        public LauncherViewModel Launcher { get; }
 
         // Every top-level tab - GMS/CMS/Live/Server Status/OpTool/Settings and any extra - regardless of
         // visibility. TabsView (sorted + filtered to IsVisible) is what the TabControl renders.
@@ -334,6 +340,29 @@ namespace CommandCenter.ViewModel
             }
 
             TabsView.Refresh();
+
+            // Tab adds/removes already reached the Launcher via Tabs.CollectionChanged above, but a
+            // reorder doesn't touch the collection - re-sort its dropdown to the new order.
+            Launcher.RefreshSections();
+        }
+
+        // The Launcher tab wears whichever build tab is selected in its dropdown (custom icon
+        // included) instead of a fixed icon of its own; falls back to its default when nothing's
+        // selected.
+        private void Launcher_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(LauncherViewModel.SelectedIconSource))
+            {
+                SyncLauncherTabIcon();
+            }
+        }
+
+        private void SyncLauncherTabIcon()
+        {
+            foreach (var tab in Tabs.Where(t => ReferenceEquals(t.Content, Launcher)))
+            {
+                tab.SetIconOverride(Launcher.SelectedIconSource);
+            }
         }
 
         private TabInfo CreateTabInfo(TabSettings settings)
@@ -345,6 +374,7 @@ namespace CommandCenter.ViewModel
                 TabKind.OpTool => OpTool,
                 TabKind.MaintenanceVerification => new MaintenanceVerificationViewModel(_appSettings, _settingsService, () => _appSettings.Tabs),
                 TabKind.BuildRepo => new BuildRepoViewModel(_appSettings, _settingsService, () => _appSettings.Tabs, FindBuildSection),
+                TabKind.Launcher => Launcher,
                 TabKind.Settings => Settings,
                 _ => throw new InvalidOperationException($"Unknown tab kind: {settings.Kind}")
             };
@@ -355,7 +385,14 @@ namespace CommandCenter.ViewModel
                 vm.ClientLaunched += OnClientLaunched;
             }
 
-            return new TabInfo(settings, content);
+            var tabInfo = new TabInfo(settings, content);
+
+            if (ReferenceEquals(content, Launcher))
+            {
+                tabInfo.SetIconOverride(Launcher.SelectedIconSource);
+            }
+
+            return tabInfo;
         }
 
         // Lets the Build Repo tab check whether a target tab is mid-update before extracting into it,

@@ -46,10 +46,25 @@ namespace CommandCenter.ViewModel
         public bool IsVisible => Settings.IsVisible;
         public int Order => Settings.Order;
 
+        private string? _iconOverride;
+
         // Live, not cached - reacts to CustomIconPath changing (Settings' "Change Icon"/"Use
         // Default", see DraftTabViewModel) via the PropertyChanged forwarding above, same pattern
         // Title already uses. See TabIconCatalog.IconFor for the Kind/Category default this falls
-        // back to.
-        public string IconSource => TabIconCatalog.IconFor(Settings);
+        // back to. A runtime override (SetIconOverride) wins over both - only the Launcher tab
+        // uses it, to wear whichever build tab's icon is currently selected in its dropdown.
+        public string IconSource => _iconOverride ?? TabIconCatalog.IconFor(Settings);
+
+        // Never persisted - purely a live display tweak. Pass null to go back to the normal icon.
+        public void SetIconOverride(string? iconSource)
+        {
+            if (_iconOverride == iconSource)
+            {
+                return;
+            }
+
+            _iconOverride = iconSource;
+            OnPropertyChanged(nameof(IconSource));
+        }
     }
 }

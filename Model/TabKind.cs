@@ -10,6 +10,9 @@ namespace CommandCenter.Model
     // settings.json stores this enum as its underlying int (no JsonStringEnumConverter), so new
     // members must only ever be APPENDED - inserting one mid-list would silently re-map every
     // existing install's saved tabs to the wrong kind on next load.
+    //
+    // Launcher: one permanent tab that houses every BuildSection tab's Launch / Debug Command /
+    // Equipment Creation / Documents panels behind a single dropdown - see LauncherViewModel.
     public enum TabKind
     {
         BuildSection,
@@ -18,6 +21,7 @@ namespace CommandCenter.Model
         ActiveClients,
         OpTool,
         MaintenanceVerification,
-        BuildRepo
+        BuildRepo,
+        Launcher
     }
 }

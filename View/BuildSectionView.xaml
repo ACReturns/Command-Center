@@ -3,6 +3,7 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:local="clr-namespace:CommandCenter.View"
              mc:Ignorable="d" d:DesignWidth="740" d:DesignHeight="620">
     <!-- Outer layout: everything scrolls EXCEPT the progress/status strip at the bottom, which is
          pinned so a running New Build/Patch/Pushed to Live is always visible no matter how far
@@ -158,207 +159,17 @@
             </StackPanel>
 
             <!-- Launch panel: this tab's own enabled executables (from Settings' "Available
-                 Executables") + this section's own server list -->
+                 Executables") + this section's own server list, debug commands and equipment
+                 picker. Shared with the Launcher tab - see View/LaunchPanelView.xaml. -->
             <StackPanel Visibility="{Binding IsLaunchPanelVisible, Converter={StaticResource BoolToVis}}">
-                <TextBlock Foreground="#FFB00000" Margin="0,0,0,8" Visibility="{Binding IsSelectedExecutableMissing, Converter={StaticResource BoolToVis}}">
-                    <Run Text="{Binding SelectedExecutable, Mode=OneWay}"/>
-                    <Run Text=" was not found in the build folder."/>
-                </TextBlock>
-
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="16"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-
-                    <StackPanel Grid.Column="0">
-                        <TextBlock Text="Select Executable" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <ComboBox ItemsSource="{Binding ExecutableOptions}" SelectedItem="{Binding SelectedExecutable}"/>
-                    </StackPanel>
-
-                    <StackPanel Grid.Column="2">
-                        <TextBlock Text="Select Server" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                        <ComboBox ItemsSource="{Binding ServerOptions}" DisplayMemberPath="DisplayName" SelectedItem="{Binding SelectedServerOption}"/>
-                    </StackPanel>
-                </Grid>
-
-                <Button Content="Launch Build" Width="160" HorizontalAlignment="Left" Padding="8,4" Margin="0,12,0,0" Command="{Binding LaunchCommand}"/>
-
-                <!-- Debug command list: toggling this on shows an Add/Edit/Delete editor for this
-                     tab's saved cmd_uidebug.txt (see Services/DebugCommandListService). The
-                     entries themselves are saved under AppData regardless of this checkbox - it
-                     only controls whether this editor is shown and whether Launch Build copies
-                     the file into the build folder (see BuildSectionViewModel.Launch). -->
-                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                    <CheckBox Content="Enable Debug Command List" IsChecked="{Binding DebugCommandListEnabled}" VerticalAlignment="Center"/>
-
-                    <!-- Existing Equipment Creation: shows the item picker just below (one tab per
-                         tab of "MS - Equip Creation v2.1.xlsx"). Only controls whether the picker
-                         is visible - see BuildSectionViewModel.ExistingEquipmentCreationEnabled. -->
-                    <CheckBox Content="Existing Equipment Creation" IsChecked="{Binding ExistingEquipmentCreationEnabled}"
-                              VerticalAlignment="Center" Margin="24,0,0,0"
-                              ToolTip="Pick existing items from the equipment sheet to add their create commands to the debug command list."/>
-                </StackPanel>
-
-                <!-- Existing Equipment Creation picker. Sits ABOVE the debug command editor on
-                     purpose: ticking an item turns "Enable Debug Command List" on, which reveals
-                     the editor - with the picker first, that reveal happens below the cursor
-                     instead of shifting the list being clicked. Each row's checkbox adds that
-                     item's command to the debug command list (unticking removes it), and is kept in
-                     sync with the saved list - see BuildSectionViewModel.OnEquipmentItemToggled /
-                     SyncEquipmentSelection. Items are grouped under a header only where the sheet
-                     has a category for them (Armor by class); everything else is a flat list per
-                     tab. -->
-                <StackPanel Visibility="{Binding ExistingEquipmentCreationEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
-                    <TextBlock Text="Existing Equipment Creation" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                    <TextBlock Text="Tick an item to add its create command to the debug command list (this also turns the list on). Untick to remove it. Equipment is created Legendary with 3 potential lines and 3 bonus potential lines, same as the sheet's default."
-                               Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
-
-                    <TabControl ItemsSource="{Binding EquipmentTabs}">
-                        <TabControl.ItemTemplate>
-                            <DataTemplate>
-                                <TextBlock Text="{Binding Title}"/>
-                            </DataTemplate>
-                        </TabControl.ItemTemplate>
-                        <TabControl.ContentTemplate>
-                            <DataTemplate>
-                              <DockPanel>
-                                <!-- Select All for the whole tab. Pinned above the scrolling list so it
-                                     stays reachable however long the tab is. Shows the mixed state when
-                                     only some rows are ticked; a click always means "tick everything
-                                     that isn't" (or untick all, if everything already is) - see
-                                     EquipmentSelectionScope.ToggleAllCommand. IsChecked is OneWay on
-                                     purpose: the command, not a binding setter, changes the rows, and
-                                     the resulting AllSelected notification redraws the box. -->
-                                <CheckBox DockPanel.Dock="Top" Content="Select All" FontWeight="SemiBold" Margin="8,4,0,2"
-                                          IsChecked="{Binding AllSelected, Mode=OneWay}"
-                                          Command="{Binding ToggleAllCommand}"/>
-                                <ScrollViewer VerticalScrollBarVisibility="Auto" MaxHeight="220" Padding="6,2">
-                                    <ItemsControl ItemsSource="{Binding Groups}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <StackPanel Margin="0,0,0,6">
-                                                    <!-- Category header (Armor's class) with its own Select All, so
-                                                         one class can be grabbed without the rest of the tab. Hidden
-                                                         for header-less groups, where the tab's Select All above
-                                                         already covers exactly the same rows. -->
-                                                    <StackPanel Orientation="Horizontal" Margin="0,4,0,2"
-                                                                Visibility="{Binding HasHeader, Converter={StaticResource BoolToVis}}">
-                                                        <TextBlock Text="{Binding Header}" FontWeight="Bold" VerticalAlignment="Center"/>
-                                                        <CheckBox Content="Select All" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center"
-                                                                  IsChecked="{Binding AllSelected, Mode=OneWay}"
-                                                                  Command="{Binding ToggleAllCommand}"/>
-                                                    </StackPanel>
-                                                    <ItemsControl ItemsSource="{Binding Items}">
-                                                        <ItemsControl.ItemTemplate>
-                                                            <DataTemplate>
-                                                                <CheckBox IsChecked="{Binding IsSelected}" Margin="0,2" ToolTip="{Binding Command}">
-                                                                    <!-- Two lines: the item's name (plus its type, where the sheet
-                                                                         has one) on top, its item ID directly beneath, so it's clear
-                                                                         which item an ID is. -->
-                                                                    <StackPanel>
-                                                                        <StackPanel Orientation="Horizontal">
-                                                                            <TextBlock Text="{Binding Name}"/>
-                                                                            <TextBlock Text="{Binding Detail, StringFormat=' - {0}'}" Margin="2,0,0,0" Foreground="#FF666666"
-                                                                                       Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}"/>
-                                                                        </StackPanel>
-                                                                        <TextBlock Text="{Binding ItemIdDisplay, StringFormat='Item ID: {0}'}" FontSize="11" Foreground="#FF888888"/>
-                                                                    </StackPanel>
-                                                                </CheckBox>
-                                                            </DataTemplate>
-                                                        </ItemsControl.ItemTemplate>
-                                                    </ItemsControl>
-                                                </StackPanel>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </ScrollViewer>
-                              </DockPanel>
-                            </DataTemplate>
-                        </TabControl.ContentTemplate>
-                    </TabControl>
-                </StackPanel>
-
-                <StackPanel Visibility="{Binding DebugCommandListEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
-                    <TextBlock Text="Debug Commands" FontWeight="SemiBold" Margin="0,0,0,2"/>
-                    <TextBlock Text="Saved here, then copied into the build folder as cmd_uidebug.txt right before Launch Build runs."
-                               Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
-
-                    <Border MinHeight="60" MaxHeight="140" Background="White" BorderBrush="#FFB0B0B0" BorderThickness="1">
-                        <Grid>
-                            <TextBlock Text="No debug commands yet. Use Add below."
-                                       TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
-                                       Visibility="{Binding HasDebugCommands, Converter={StaticResource InverseBoolToVis}}"/>
-                            <ListBox x:Name="DebugCommandsListBox" ItemsSource="{Binding DebugCommands}" BorderThickness="0" MaxHeight="140"
-                                     Visibility="{Binding HasDebugCommands, Converter={StaticResource BoolToVis}}"/>
-                        </Grid>
-                    </Border>
-
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <Button Content="Add..." Width="80" Padding="6,3" Command="{Binding AddDebugCommandCommand}"/>
-                        <!-- Carries an existing debug command list (an old cmd_uidebug.txt, or
-                             any plain text file with one command per line) straight into this
-                             tab's saved list instead of retyping every line via Add. -->
-                        <Button Content="Import..." Width="80" Padding="6,3" Margin="8,0,0,0" Command="{Binding ImportDebugCommandsCommand}"/>
-                        <Button Content="Edit..." Width="80" Padding="6,3" Margin="8,0,0,0"
-                                Command="{Binding EditDebugCommandCommand}"
-                                CommandParameter="{Binding SelectedItem, ElementName=DebugCommandsListBox}"/>
-                        <Button Content="Delete" Width="80" Padding="6,3" Margin="8,0,0,0"
-                                Command="{Binding DeleteDebugCommandCommand}"
-                                CommandParameter="{Binding SelectedItem, ElementName=DebugCommandsListBox}"/>
-                    </StackPanel>
-                </StackPanel>
+                <local:LaunchPanelView/>
             </StackPanel>
         </Grid>
 
         <!-- Documents: always visible regardless of the mode selected above - attached to
-             whichever build this section currently points at (see DocumentsService /
-             BuildSectionViewModel.SyncDocumentsFolder). Files can be dropped straight from
-             Explorer onto the box below, or added via the button; double-click an entry to open
-             it. Auto-refreshes on any external change to the folder via a FileSystemWatcher. -->
-        <Border Grid.Row="3" Background="#FFF3F3F3" BorderBrush="#FFD0D0D0" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,12,0,0">
-            <StackPanel>
-                <TextBlock Text="{Binding DocumentsFolderLabel}" FontWeight="SemiBold" Margin="0,0,0,4"/>
-
-                <TextBlock Text="Not configured. Set this section's build path in the Settings tab first." Foreground="#FFB00000" Margin="0,0,0,4"
-                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
-
-                <StackPanel Visibility="{Binding HasBuildPath, Converter={StaticResource BoolToVis}}">
-                    <Border x:Name="DocumentsDropZone" MinHeight="70" MaxHeight="160" Background="White" BorderBrush="#FFB0B0B0" BorderThickness="1"
-                            AllowDrop="True" DragEnter="DocumentsDropZone_DragEnter" DragOver="DocumentsDropZone_DragEnter" Drop="DocumentsDropZone_Drop">
-                        <Grid>
-                            <TextBlock Text="No current documents for this build. Drag &amp; drop files here, or use Add File below."
-                                       TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
-                                       Visibility="{Binding HasDocuments, Converter={StaticResource InverseBoolToVis}}"/>
-                            <ListBox x:Name="DocumentsListBox" ItemsSource="{Binding Documents}" BorderThickness="0" MaxHeight="160"
-                                     Visibility="{Binding HasDocuments, Converter={StaticResource BoolToVis}}"
-                                     MouseDoubleClick="DocumentsList_MouseDoubleClick"
-                                     PreviewKeyDown="DocumentsList_PreviewKeyDown">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Name}" Margin="4,3" ToolTip="{Binding FullPath}"/>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </Grid>
-                    </Border>
-                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                        <!-- Opens the Documents folder itself (not a specific entry) in Explorer -
-                             the current version-family folder per DocumentsFolderLabel above. -->
-                        <Button Content="Open Folder" Width="100" Padding="6,3"
-                                Command="{Binding OpenDocumentsFolderCommand}"/>
-                        <Button Content="Add File..." Width="120" Padding="6,3" Margin="8,0,0,0" Command="{Binding AddDocumentFilesCommand}"/>
-                        <!-- Deletes whatever's selected in the list above (also removable via the
-                             Delete key - see DocumentsList_PreviewKeyDown); BuildSectionViewModel.
-                             DeleteDocument confirms first, since this is a permanent delete. -->
-                        <Button Content="Delete" Width="90" Padding="6,3" Margin="8,0,0,0"
-                                Command="{Binding DeleteDocumentCommand}"
-                                CommandParameter="{Binding SelectedItem, ElementName=DocumentsListBox}"/>
-                    </StackPanel>
-                </StackPanel>
-            </StackPanel>
-        </Border>
+             whichever build this section currently points at. Shared with the Launcher tab -
+             see View/DocumentsPanelView.xaml. -->
+        <local:DocumentsPanelView Grid.Row="3" Margin="0,12,0,0"/>
 
     </Grid>
     </ScrollViewer>

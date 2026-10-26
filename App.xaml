@@ -6,5 +6,6 @@
     <Application.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
         <local:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVis"/>
+        <local:TabIconImageConverter x:Key="TabIconImage"/>
     </Application.Resources>
 </Application>

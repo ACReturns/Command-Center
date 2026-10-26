@@ -383,9 +383,12 @@ namespace CommandCenter.ViewModel
         {
             var previous = SelectedTarget?.Id ?? _appSettings.BuildRepoLastTargetTabId;
 
+            // Every build tab, visible or hidden - the build tabs can be hidden in Settings and
+            // driven from the Launcher + this tab instead, so visibility doesn't matter here. Runs
+            // on every OnActivated, so a tab created in Settings shows up next time this tab opens.
             Targets.Clear();
             foreach (var tab in _tabsProvider()
-                         .Where(t => t.Kind == TabKind.BuildSection && t.IsVisible)
+                         .Where(t => t.Kind == TabKind.BuildSection)
                          .OrderBy(t => t.Order))
             {
                 Targets.Add(new BuildRepoTargetOption(tab));

@@ -127,6 +127,10 @@ namespace CommandCenter.Model
         // Build Repo tab's last-picked "Download for tab" target (TabSettings.Id), restored on launch.
         public Guid? BuildRepoLastTargetTabId { get; set; }
 
+        // Launcher tab's last-picked build tab (TabSettings.Id), restored on launch - see
+        // LauncherViewModel. Null on a settings.json saved before the Launcher existed.
+        public Guid? LauncherLastTabId { get; set; }
+
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
         // resets these to empty immediately after migrating them into Tabs once.

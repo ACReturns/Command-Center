@@ -75,6 +75,9 @@ namespace CommandCenter.Model
             TabKind.OpTool => "img/OpTool.ico",
             TabKind.MaintenanceVerification => "img/Checksum.ico",
             TabKind.BuildRepo => "img/BuildRepo.ico",
+            // Only shown until a build is picked - the Launcher's tab-strip icon then mirrors the
+            // selected build tab's own icon (TabInfo.SetIconOverride, wired in MainViewModel).
+            TabKind.Launcher => "img/AppIcon.ico",
             TabKind.Settings => "img/Settings.ico",
             TabKind.BuildSection => category switch
             {

@@ -138,6 +138,9 @@
                 <DataTemplate DataType="{x:Type ViewModel:BuildRepoViewModel}">
                     <View:BuildRepoView/>
                 </DataTemplate>
+                <DataTemplate DataType="{x:Type ViewModel:LauncherViewModel}">
+                    <View:LauncherView/>
+                </DataTemplate>
             </TabControl.Resources>
             <TabControl.ItemTemplate>
                 <DataTemplate>

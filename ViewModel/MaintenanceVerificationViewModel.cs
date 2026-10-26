@@ -251,17 +251,17 @@ namespace CommandCenter.ViewModel
         }
 
         /// <summary>
-        /// Rebuilds the installed-build picker from the user's current tab setup. Only tabs currently
-        /// checked visible in Settings are offered - a hidden build tab (unchecked "Visible" in the
-        /// tab list, [[tab_management]]'s IsVisible) shouldn't show up here even if it still has a
-        /// Build Path set, since the user can't actually see or work with that build right now.
+        /// Rebuilds the installed-build picker from the user's current tab setup. Every build tab with
+        /// a Build Path is offered, visible or hidden - build tabs can be hidden in Settings and
+        /// driven from the Launcher / Build Repo tabs instead, so visibility doesn't matter here.
+        /// Runs on every OnActivated, so a tab created in Settings shows up next time this tab opens.
         /// </summary>
         public void RefreshInstalledBuilds()
         {
             var previousTabId = _selectedBuild?.TabId;
 
             var builds = _tabsProvider()
-                .Where(t => t.Kind == TabKind.BuildSection && t.IsVisible && !string.IsNullOrWhiteSpace(t.BuildPath))
+                .Where(t => t.Kind == TabKind.BuildSection && !string.IsNullOrWhiteSpace(t.BuildPath))
                 .OrderBy(t => t.Order)
                 .Select(t => new InstalledBuildOption(t.Id, t.Title ?? string.Empty, t.VersionNumber ?? string.Empty, t.BuildPath!))
                 .ToList();
