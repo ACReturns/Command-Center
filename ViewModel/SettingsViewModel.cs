@@ -7,7 +7,7 @@ using CommandCenter.Model;
 
 namespace CommandCenter.ViewModel
 {
-    // Owns the DRAFT copy of every tab's settings while the Settings tab is open (DraftTabs).
+    // Owns the DRAFT copy of every tab's settings while the Settings tab is open (AppTabs / BuildTabs).
     // Nothing here touches the live AppSettings.Tabs - or the live TabInfo/BuildSectionViewModel
     // instances MainWindow actually renders - until Save() is called. That's what makes
     // discarding unsaved changes trivial: MainViewModel's tab-switch guard just calls
@@ -36,14 +36,27 @@ namespace CommandCenter.ViewModel
 
             AddTabCommand = new RelayCommand(_ => AddTab());
             SaveCommand = new RelayCommand(_ => Save(), _ => IsDirty);
-            MoveTabUpCommand = new RelayCommand(param => MoveTab(param as DraftTabViewModel, -1), param => CanMove(param as DraftTabViewModel, -1));
-            MoveTabDownCommand = new RelayCommand(param => MoveTab(param as DraftTabViewModel, 1), param => CanMove(param as DraftTabViewModel, 1));
 
             LoadDraftFromLive();
         }
 
-        // Every tab's draft, in display order - Settings' own row is in here like any other.
-        public ObservableCollection<DraftTabViewModel> DraftTabs { get; } = new();
+        // Settings shows tabs in two sections: the application tabs (Server Status, OpTool,
+        // Maintenance Verification, Build Repo, Launcher, Settings) that live in the main tab strip,
+        // and below them the build tabs (GMS/CMS/Live and anything from "+ Add Build Tab") that
+        // are only reached through the Launcher/Build Repo dropdowns. Each list is in its own
+        // display order and reorders independently - Save() writes build tabs first, then app
+        // tabs, into one Order sequence (the two groups never share a list anywhere else, so
+        // their relative order doesn't matter).
+        public ObservableCollection<DraftTabViewModel> AppTabs { get; } = new();
+        public ObservableCollection<DraftTabViewModel> BuildTabs { get; } = new();
+
+        private IEnumerable<DraftTabViewModel> AllDrafts => BuildTabs.Concat(AppTabs);
+
+        private ObservableCollection<DraftTabViewModel>? ListFor(DraftTabViewModel? draft) =>
+            draft == null ? null
+            : BuildTabs.Contains(draft) ? BuildTabs
+            : AppTabs.Contains(draft) ? AppTabs
+            : null;
 
         // True the moment any draft field changes, a tab is added/deleted/restored, or the order
         // changes - cleared by Save() or DiscardChanges(). MainViewModel reads this to decide
@@ -138,8 +151,6 @@ namespace CommandCenter.ViewModel
 
         public RelayCommand AddTabCommand { get; }
         public RelayCommand SaveCommand { get; }
-        public RelayCommand MoveTabUpCommand { get; }
-        public RelayCommand MoveTabDownCommand { get; }
 
         // No more GMS/CMS/Live picker - extras are independent top-level tabs now, not nested
         // under a parent category, so there's nothing meaningful to pick. Every tab created here
@@ -149,34 +160,58 @@ namespace CommandCenter.ViewModel
         private void AddTab()
         {
             const SectionCategory category = SectionCategory.General;
-            int existingCount = DraftTabs.Count(d => d.Category == category && !d.IsMarkedForDeletion);
-            var draft = DraftTabViewModel.CreateNew(category, $"New Tab {existingCount + 1}");
+            int existingCount = BuildTabs.Count(d => d.Category == category && !d.IsMarkedForDeletion);
+            var draft = DraftTabViewModel.CreateNew(category, $"New Build Tab {existingCount + 1}");
             draft.Changed += OnDraftChanged;
-            DraftTabs.Add(draft);
+            BuildTabs.Add(draft);
+            RefreshDeleteGuards();
             IsDirty = true;
         }
 
-        private bool CanMove(DraftTabViewModel? draft, int delta)
+        // The last build tab not already marked for deletion can't be deleted - the Launcher and
+        // Build Repo dropdowns need at least one build to point at. Re-run whenever a build tab is
+        // added, deleted, or restored.
+        private void RefreshDeleteGuards()
         {
-            if (draft == null)
-            {
-                return false;
-            }
+            int remaining = BuildTabs.Count(d => !d.IsMarkedForDeletion);
 
-            int index = DraftTabs.IndexOf(draft);
-            int target = index + delta;
-            return index >= 0 && target >= 0 && target < DraftTabs.Count;
+            foreach (var draft in BuildTabs)
+            {
+                draft.IsLastBuildTab = remaining <= 1 && !draft.IsMarkedForDeletion;
+            }
         }
 
-        private void MoveTab(DraftTabViewModel? draft, int delta)
+        // Drag-and-drop reorder (SettingsView.xaml.cs). Only allowed within the same section -
+        // dragging an app tab onto a build tab (or vice versa) is a no-op.
+        public bool CanReorder(DraftTabViewModel dragged, DraftTabViewModel target) =>
+            !ReferenceEquals(dragged, target) && ListFor(dragged) is { } list && ReferenceEquals(list, ListFor(target));
+
+        // Moves dragged to just before (insertAfter = false) or just after target.
+        public void MoveTabTo(DraftTabViewModel dragged, DraftTabViewModel target, bool insertAfter)
         {
-            if (!CanMove(draft, delta))
+            if (!CanReorder(dragged, target))
             {
                 return;
             }
 
-            int index = DraftTabs.IndexOf(draft!);
-            DraftTabs.Move(index, index + delta);
+            var list = ListFor(dragged)!;
+            int from = list.IndexOf(dragged);
+            int targetIndex = list.IndexOf(target);
+
+            // Index to land on once dragged has been pulled out of its old slot.
+            int to = targetIndex + (insertAfter ? 1 : 0);
+            if (from < to)
+            {
+                to--;
+            }
+
+            to = Math.Clamp(to, 0, list.Count - 1);
+            if (to == from)
+            {
+                return;
+            }
+
+            list.Move(from, to);
             IsDirty = true;
         }
 
@@ -184,19 +219,22 @@ namespace CommandCenter.ViewModel
         // both at construction and whenever unsaved changes are discarded.
         private void LoadDraftFromLive()
         {
-            foreach (var draft in DraftTabs)
+            foreach (var draft in AllDrafts)
             {
                 draft.Changed -= OnDraftChanged;
             }
 
-            DraftTabs.Clear();
+            AppTabs.Clear();
+            BuildTabs.Clear();
 
             foreach (var settings in _appSettings.Tabs.OrderBy(t => t.Order))
             {
                 var draft = DraftTabViewModel.FromSettings(settings);
                 draft.Changed += OnDraftChanged;
-                DraftTabs.Add(draft);
+                (draft.IsBuildSection ? BuildTabs : AppTabs).Add(draft);
             }
+
+            RefreshDeleteGuards();
 
             // Set the backing field directly (not the RunAsAdministrator property) so this load
             // doesn't itself flip IsDirty true one line before it's reset below - same reasoning
@@ -213,7 +251,11 @@ namespace CommandCenter.ViewModel
             IsDirty = false;
         }
 
-        private void OnDraftChanged() => IsDirty = true;
+        private void OnDraftChanged()
+        {
+            RefreshDeleteGuards();
+            IsDirty = true;
+        }
 
         // Called by MainViewModel's tab-switch guard when the user chooses to leave Settings
         // without saving. Live AppSettings.Tabs was never touched, so this is just a fresh clone
@@ -241,10 +283,11 @@ namespace CommandCenter.ViewModel
         {
             var liveById = _appSettings.Tabs.ToDictionary(t => t.Id);
             var newLiveList = new List<TabSettings>();
+            var drafts = AllDrafts.ToList();
 
-            for (int i = 0; i < DraftTabs.Count; i++)
+            for (int i = 0; i < drafts.Count; i++)
             {
-                var draft = DraftTabs[i];
+                var draft = drafts[i];
 
                 if (draft.IsMarkedForDeletion)
                 {
@@ -252,8 +295,10 @@ namespace CommandCenter.ViewModel
                 }
 
                 // Settings itself can never be hidden - it's the only way back into Settings -
-                // regardless of whatever the draft's checkbox says.
-                bool isVisible = draft.Kind == TabKind.Settings ? true : draft.IsVisible;
+                // regardless of whatever the draft's checkbox says. Build tabs no longer have a
+                // visibility toggle (they're never in the main tab strip), so they're just left
+                // true rather than carrying a stale hidden flag from an older settings.json.
+                bool isVisible = draft.Kind == TabKind.Settings || draft.IsBuildSection ? true : draft.IsVisible;
 
                 if (liveById.TryGetValue(draft.Id, out var live))
                 {

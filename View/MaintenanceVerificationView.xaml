@@ -125,14 +125,17 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Installed build:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                <Grid Grid.Row="0" Grid.Column="1">
-                    <ComboBox ItemsSource="{Binding InstalledBuilds}"
-                              SelectedItem="{Binding SelectedBuild, Mode=TwoWay}"
-                              DisplayMemberPath="Display"
-                              IsEnabled="{Binding HasInstalledBuilds}"
-                              MaxWidth="480" HorizontalAlignment="Left" MinWidth="280"/>
-                </Grid>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Live build folder:" VerticalAlignment="Top" Margin="0,4,10,0"/>
+                <StackPanel Grid.Row="0" Grid.Column="1">
+                    <DockPanel LastChildFill="True" MaxWidth="640" HorizontalAlignment="Left">
+                        <Button DockPanel.Dock="Right" Content="Browse..." Command="{Binding BrowseLiveBuildCommand}"
+                                Padding="12,2" Margin="6,0,0,0" MinWidth="80"/>
+                        <TextBox Text="{Binding LiveBuildPathDisplay, Mode=OneWay}" IsReadOnly="True"
+                                 MinWidth="320" VerticalContentAlignment="Center" Padding="4,2"
+                                 ToolTip="{Binding LiveBuildPathDisplay, Mode=OneWay}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding LiveBuildInfo}" Margin="0,3,0,0" Opacity="0.7" FontSize="11"/>
+                </StackPanel>
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Checksum:" VerticalAlignment="Center" Margin="0,6,10,0"/>
                 <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding SelectedRowDisplay}" VerticalAlignment="Center"

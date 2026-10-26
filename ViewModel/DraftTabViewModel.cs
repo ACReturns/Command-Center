@@ -32,6 +32,7 @@ namespace CommandCenter.ViewModel
         private bool _isMarkedForDeletion;
         private bool _isServersExpanded;
         private bool _isExecutablesExpanded;
+        private bool _isLastBuildTab;
 
         private DraftTabViewModel(Guid id, TabKind kind, SectionCategory category, bool isPermanent, bool isNew,
             string title, bool isVisible, string buildPath, string versionNumber, string? lastVersionPushedToLive,
@@ -127,8 +128,13 @@ namespace CommandCenter.ViewModel
         public bool IsBuildSection => Kind == TabKind.BuildSection;
 
         // Settings can never be hidden - it's the user's only way back into Settings, so taking
-        // it away would lock them out. Every other tab (permanent or not) can be hidden.
-        public bool CanHide => Kind != TabKind.Settings;
+        // it away would lock them out. Build tabs don't get a Visible checkbox at all anymore -
+        // they never appear in the main tab strip (see MainViewModel.TabsView) and are reached
+        // through the Launcher/Build Repo dropdowns instead. Every other app tab can be hidden.
+        public bool CanHide => Kind != TabKind.Settings && !IsBuildSection;
+
+        // Whether SettingsView shows the Visible checkbox for this row at all.
+        public bool ShowVisibilityToggle => !IsBuildSection;
 
         public bool IsMarkedForDeletion
         {
@@ -142,7 +148,22 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public bool CanDelete => !IsPermanent && !IsMarkedForDeletion;
+        // Every build tab is deletable now - GMS/CMS/Live included - so a user who only needs one
+        // build can drop the rest, or add several and keep them all. Non-build permanent tabs
+        // (Server Status/OpTool/Maintenance Verification/Build Repo/Launcher/Settings) still can't
+        // be deleted. Drives the Delete button's Visibility in SettingsView.
+        public bool IsDeletable => IsBuildSection || !IsPermanent;
+
+        // Set by SettingsViewModel when this is the only build tab not already marked for deletion -
+        // the Launcher/Build Repo dropdowns need at least one build tab to point at, so the last one
+        // can't be deleted (its Delete button disables instead).
+        public bool IsLastBuildTab
+        {
+            get => _isLastBuildTab;
+            set { if (SetProperty(ref _isLastBuildTab, value)) OnPropertyChanged(nameof(CanDelete)); }
+        }
+
+        public bool CanDelete => IsDeletable && !IsMarkedForDeletion && !IsLastBuildTab;
 
         public string Title
         {

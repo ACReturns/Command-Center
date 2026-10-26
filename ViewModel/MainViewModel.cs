@@ -81,9 +81,9 @@ namespace CommandCenter.ViewModel
             // live-shaping needed.
             TabsView = CollectionViewSource.GetDefaultView(Tabs);
             TabsView.SortDescriptions.Add(new SortDescription(nameof(TabInfo.Order), ListSortDirection.Ascending));
-            TabsView.Filter = o => o is TabInfo t && t.IsVisible;
+            TabsView.Filter = o => o is TabInfo t && IsInTabStrip(t);
 
-            _selectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+            _selectedTab = Tabs.FirstOrDefault(IsInTabStrip);
 
             // Startup check so the tracker has a real number before any build ever runs, rather
             // than sitting blank until the first extraction. Uses whichever BuildSection tab
@@ -102,6 +102,11 @@ namespace CommandCenter.ViewModel
             _storageRecheckTimer.Tick += (_, _) => RecheckStorage();
             _storageRecheckTimer.Start();
         }
+
+        // Build tabs (GMS/CMS/Live and every "+ Add Build Tab" tab) never appear in the main tab
+        // strip - they're reached through the Launcher/Build Repo dropdowns instead (both list
+        // every BuildSection tab regardless of this). Everything else shows if it's visible.
+        private static bool IsInTabStrip(TabInfo t) => t.IsVisible && t.Settings.Kind != TabKind.BuildSection;
 
         public SettingsViewModel Settings { get; }
         public ServerStatusViewModel ServerStatus { get; }
@@ -163,7 +168,7 @@ namespace CommandCenter.ViewModel
                         // fall back to any visible tab rather than pointing at one that no longer exists.
                         if (target != null && !Tabs.Contains(target))
                         {
-                            target = Tabs.FirstOrDefault(t => t.IsVisible);
+                            target = Tabs.FirstOrDefault(IsInTabStrip);
                         }
                     }
                     finally
@@ -329,7 +334,7 @@ namespace CommandCenter.ViewModel
 
                 if (ReferenceEquals(SelectedTab, tabInfo))
                 {
-                    SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+                    SelectedTab = Tabs.FirstOrDefault(IsInTabStrip);
                 }
             }
 
@@ -456,7 +461,7 @@ namespace CommandCenter.ViewModel
 
             if (wasSelected)
             {
-                SelectedTab = Tabs.FirstOrDefault(t => t.IsVisible);
+                SelectedTab = Tabs.FirstOrDefault(IsInTabStrip);
             }
 
             _activeClientsViewModel!.TrackingBecameEmpty -= OnActiveClientsTrackingEmpty;
@@ -484,9 +489,8 @@ namespace CommandCenter.ViewModel
                 allTabs: Tabs);
 
         // A deleted tab's documents shouldn't outlive it - "we don't want to keep anything from
-        // the extra builds." Never actually reached for the 5 permanent tabs, which can't be
-        // marked for deletion in the first place (DraftTabViewModel.DeleteCommand is disabled for
-        // IsPermanent tabs). A custom icon (see TabSettings.CustomIconPath) is the same story - if
+        // the extra builds." Any build tab can reach this now, GMS/CMS/Live included (see
+        // DraftTabViewModel.IsDeletable); the non-build permanent tabs still never can. A custom icon (see TabSettings.CustomIconPath) is the same story - if
         // this tab ever had one, its file under AppPaths.TabIconsFolder has nothing left to serve
         // once the tab itself is gone, so it's deleted best-effort right alongside the Documents
         // folder rather than left to accumulate in AppData forever. Its saved debug command list

@@ -13,246 +13,267 @@
             <Setter Property="Padding" Value="12"/>
             <Setter Property="Margin" Value="0,0,0,10"/>
         </Style>
+
+        <!-- One row per tab, shared by the Application Tabs and Build Tabs lists below. -->
+        <DataTemplate x:Key="TabRowTemplate">
+            <!-- Hold the left mouse button on any empty part of a card (or the grip on the left) and
+                 drag to reorder it within its own section - see SettingsView.xaml.cs. Clicks on
+                 buttons, text boxes, checkboxes and expander headers never start a drag. -->
+            <Border Style="{StaticResource SectionCard}" AllowDrop="True"
+                    PreviewMouseLeftButtonDown="TabCard_PreviewMouseLeftButtonDown"
+                    PreviewMouseMove="TabCard_PreviewMouseMove"
+                    PreviewMouseLeftButtonUp="TabCard_PreviewMouseLeftButtonUp"
+                    DragOver="TabCard_DragOver"
+                    DragLeave="TabCard_DragLeave"
+                    Drop="TabCard_Drop">
+                <StackPanel>
+                    <!-- Marked-for-deletion: compact row + Restore, editable fields hidden -->
+                    <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
+                        <Button Content="Restore" DockPanel.Dock="Right" Width="80" Padding="4,2" Command="{Binding RestoreCommand}"/>
+                        <TextBlock VerticalAlignment="Center">
+                            <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
+                            <Run Text=" will be deleted on save" Foreground="#FFB00000"/>
+                        </TextBlock>
+                    </DockPanel>
+
+                    <!-- Normal editable row -->
+                    <StackPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
+                        <DockPanel Margin="0,0,0,8">
+                            <TextBlock DockPanel.Dock="Left" Text="&#x2630;" FontSize="14" Foreground="#FF999999"
+                                       VerticalAlignment="Center" Margin="0,0,8,0" Cursor="SizeAll"
+                                       ToolTip="Hold and drag to reorder"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button Content="Delete" Width="70" Padding="4,2" Background="#FFFDECEA"
+                                        Visibility="{Binding IsDeletable, Converter={StaticResource BoolToVis}}"
+                                        Command="{Binding DeleteCommand}"
+                                        ToolTip="Delete this tab on save. The last remaining build tab can't be deleted."
+                                        ToolTipService.ShowOnDisabled="True"/>
+                            </StackPanel>
+                            <CheckBox Content="Visible" DockPanel.Dock="Right" Margin="0,0,16,0" VerticalAlignment="Center"
+                                      IsChecked="{Binding IsVisible}" IsEnabled="{Binding CanHide}"
+                                      Visibility="{Binding ShowVisibilityToggle, Converter={StaticResource BoolToVis}}"
+                                      ToolTip="Settings can't be hidden - it's the only way back into this screen."/>
+                            <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
+                        </DockPanel>
+
+                        <!-- Tab icon: disabled entirely for the 5 permanent tabs, which keep whatever icon
+                             was implemented for them (see DraftTabViewModel.CanCustomizeIcon). Preview
+                             image + label both show the default derived from Kind/Category (e.g. "App
+                             Icon" for a brand-new tab) until a custom one is picked - see
+                             ChooseIconDialog/TabIconCatalog. -->
+                        <DockPanel Margin="0,0,0,10" Visibility="{Binding CanCustomizeIcon, Converter={StaticResource BoolToVis}}">
+                            <Border DockPanel.Dock="Left" Width="24" Height="24" Margin="0,0,8,0" VerticalAlignment="Center">
+                                <Image Source="{Binding IconPreviewSource}" Width="20" Height="20"/>
+                            </Border>
+                            <Button DockPanel.Dock="Left" Content="Change Icon..." Width="100" Padding="4,2" Margin="0,0,6,0"
+                                    VerticalAlignment="Center" Command="{Binding ChooseIconCommand}"/>
+                            <Button DockPanel.Dock="Left" Content="Use Default" Width="90" Padding="4,2"
+                                    VerticalAlignment="Center" Command="{Binding ResetIconCommand}"
+                                    Visibility="{Binding IsCustomIcon, Converter={StaticResource BoolToVis}}"/>
+                            <TextBlock Text="{Binding IconPreviewLabel}" VerticalAlignment="Center" Foreground="#FF888888" Margin="8,0,0,0"/>
+                        </DockPanel>
+
+                        <StackPanel Visibility="{Binding IsBuildSection, Converter={StaticResource BoolToVis}}">
+                            <DockPanel Margin="0,0,0,6">
+                                <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
+                                <TextBox Text="{Binding BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
+                            </DockPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
+
+                                <!-- Only shown once this tab has actually been a Pushed to Live source (see
+                                     TabSettings.LastVersionPushedToLive / BuildSectionViewModel.PushToLiveAsync) and
+                                     disappears again the moment a new Version Number is typed above (see
+                                     DraftTabViewModel.VersionNumber's auto-clear) - purely informational, nothing here
+                                     is editable. -->
+                                <TextBlock Text="{Binding LastVersionPushedToLiveDisplay}"
+                                           Visibility="{Binding HasLastVersionPushedToLive, Converter={StaticResource BoolToVis}}"
+                                           VerticalAlignment="Center" Margin="12,0,0,0" FontStyle="Italic" Foreground="#FF666666"/>
+                            </StackPanel>
+
+                            <!-- Only offered while this tab is brand-new (not yet saved) - see
+                                 DraftTabViewModel.CanTogglePushedToLive for why an already-saved tab can't
+                                 flip this after the fact. Once saved, the row disappears; whatever was
+                                 chosen here is locked in for this tab's lifetime. -->
+                            <CheckBox Content="Enable &quot;Pushed to Live&quot; for this tab" Margin="0,0,0,10"
+                                      IsChecked="{Binding SupportsPushedToLive}"
+                                      Visibility="{Binding CanTogglePushedToLive, Converter={StaticResource BoolToVis}}"
+                                      ToolTip="Lets this tab pull a finished build straight from another tab's Current Build folder instead of only extracting an archive."/>
+
+                            <!-- Available Servers: this tab's own launch dropdown - built-in entries (seeded
+                                 from LaunchServerCatalog, connect/disconnect only) and custom ones (added via
+                                 "+ Add Custom Server" below, freely editable/removable) side by side. See
+                                 DraftServerViewModel/TabServerEntry. Collapsed by default once a tab already
+                                 has servers configured (see DraftTabViewModel.IsServersExpanded) - expanding/
+                                 collapsing is just view state, not an unsaved change. -->
+                            <Expander IsExpanded="{Binding IsServersExpanded, Mode=TwoWay}" Margin="0,0,0,0">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Available Servers" FontWeight="SemiBold"/>
+                                        <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
+                                            <Run Text="("/>
+                                            <Run Text="{Binding Servers.Count, Mode=OneWay}"/>
+                                            <Run Text=")"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Expander.Header>
+
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6">
+                                        <Run Text="Shown here is what this tab's Launch dropdown can offer. Connect/disconnect a built-in server with its checkbox;"/>
+                                        <Run Text=" add your own below for anything not in the built-in list."/>
+                                    </TextBlock>
+
+                                    <ItemsControl ItemsSource="{Binding Servers}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
+                                                <Grid>
+                                                    <!-- Marked-for-deletion: compact row + Restore (custom servers only) -->
+                                                    <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
+                                                        <Button Content="Restore" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding RestoreCommand}"/>
+                                                        <TextBlock VerticalAlignment="Center">
+                                                            <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
+                                                            <Run Text=" will be removed on save" Foreground="#FFB00000"/>
+                                                        </TextBlock>
+                                                    </DockPanel>
+
+                                                    <!-- Normal row -->
+                                                    <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
+                                                        <CheckBox DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,3,10,0"
+                                                                  IsChecked="{Binding IsEnabled}"
+                                                                  ToolTip="Connected - included in this tab's Launch dropdown"/>
+                                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top"
+                                                                    Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBoolToVis}}">
+                                                            <Button Content="Edit" Width="50" Padding="0,2" Margin="0,0,4,0" Command="{Binding EditCommand}"/>
+                                                            <Button Content="Remove" Width="64" Padding="0,2" Background="#FFFDECEA" Command="{Binding DeleteCommand}"/>
+                                                        </StackPanel>
+                                                        <StackPanel>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"/>
+                                                                <!-- Run has no Visibility property (it's not a UIElement) - a separate TextBlock is
+                                                                     needed so this tag can be hidden for a custom entry. -->
+                                                                <TextBlock Text=" (Built-in)" Foreground="#FF999999" FontStyle="Italic" Margin="4,0,0,0"
+                                                                           Visibility="{Binding IsBuiltIn, Converter={StaticResource BoolToVis}}"/>
+                                                            </StackPanel>
+                                                            <TextBlock Text="{Binding LaunchArgumentPreview, Mode=OneWay}" FontSize="11" Foreground="#FF888888"/>
+                                                        </StackPanel>
+                                                    </DockPanel>
+                                                </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <Button Content="+ Add Custom Server" Width="150" Padding="6,4" HorizontalAlignment="Left"
+                                                Command="{Binding AddCustomServerCommand}"/>
+                                        <!-- Pulls from LaunchServerCatalog (GMS/CMS/Live) instead of the user having to look
+                                             up IPs/ports and retype them one at a time - see DraftTabViewModel.
+                                             ImportBuiltInServersCommand/ImportBuiltInServersDialog. Offered on every tab, not
+                                             just one whose Category matches, since any catalog can be borrowed from. -->
+                                        <Button Content="+ Import Built-In Servers" Width="170" Padding="6,4" HorizontalAlignment="Left" Margin="8,0,0,0"
+                                                Command="{Binding ImportBuiltInServersCommand}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Expander>
+
+                            <!-- Available Executables: every .exe found sitting in this tab's build folder
+                                 (see Helpers.ExecutableScanner/DraftTabViewModel.RescanExecutables), checked
+                                 ones feeding this tab's Select Executable dropdown (BuildSectionViewModel.
+                                 ExecutableOptions). Replaces the old fixed MapleStory.exe/MapleStoryA.exe-only
+                                 list - there's no Add/Edit/Remove here since nothing is typed in by hand,
+                                 only discovered, so the checkbox is the only control. Re-scanned every time
+                                 Browse... picks a folder, and again whenever Settings is reopened, so this
+                                 always reflects what's actually on disk right now. -->
+                            <Expander IsExpanded="{Binding IsExecutablesExpanded, Mode=TwoWay}" Margin="0,8,0,0">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="Available Executables" FontWeight="SemiBold"/>
+                                        <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
+                                            <Run Text="("/>
+                                            <Run Text="{Binding Executables.Count, Mode=OneWay}"/>
+                                            <Run Text=")"/>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </Expander.Header>
+
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6"
+                                               Visibility="{Binding HasBuildPath, Converter={StaticResource BoolToVis}}">
+                                        <Run Text="Every .exe found in this tab's build folder is listed below. Check the ones you want"/>
+                                        <Run Text=" to be able to pick from the Select Executable dropdown."/>
+                                    </TextBlock>
+                                    <TextBlock Text="Select a build folder above to scan it for executables."
+                                               TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6"
+                                               Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
+                                    <TextBlock Text="No .exe files were found directly in this folder."
+                                               TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <MultiDataTrigger>
+                                                        <MultiDataTrigger.Conditions>
+                                                            <Condition Binding="{Binding HasBuildPath}" Value="True"/>
+                                                            <Condition Binding="{Binding Executables.Count}" Value="0"/>
+                                                        </MultiDataTrigger.Conditions>
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </MultiDataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+
+                                    <ItemsControl ItemsSource="{Binding Executables}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
+                                                    <CheckBox Content="{Binding FileName, Mode=OneWay}"
+                                                              IsChecked="{Binding IsEnabled}"
+                                                              ToolTip="Available in this tab's Select Executable dropdown"/>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
     </UserControl.Resources>
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ScrollViewer x:Name="RootScroll" VerticalScrollBarVisibility="Auto" PreviewDragOver="RootScroll_PreviewDragOver">
         <StackPanel Margin="16">
-            <TextBlock Text="Tabs" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
+            <!-- Application tabs: the ones that live in the main tab strip. Same draft/save
+                 machinery as before (see SettingsViewModel.AppTabs). -->
+            <TextBlock Text="Application Tabs" FontSize="16" FontWeight="Bold" Margin="0,0,0,4"/>
             <TextBlock TextWrapping="Wrap" Foreground="#FF666666" Margin="0,0,0,12">
-                <Run Text="Reorder (&#x25B2;&#x25BC;), rename, hide, or delete tabs below, then click Save Settings."/>
+                <Run Text="Drag (&#x2630;) to reorder, rename, or hide the app's tabs below, then click Save Settings."/>
                 <Run Text=" Nothing here takes effect until you save - and switching away from this tab with unsaved changes will ask first."/>
             </TextBlock>
 
-            <ItemsControl x:Name="TabsList" ItemsSource="{Binding DraftTabs}">
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Border Style="{StaticResource SectionCard}">
-                            <StackPanel>
-                                <!-- Marked-for-deletion: compact row + Restore, editable fields hidden -->
-                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
-                                    <Button Content="Restore" DockPanel.Dock="Right" Width="80" Padding="4,2" Command="{Binding RestoreCommand}"/>
-                                    <TextBlock VerticalAlignment="Center">
-                                        <Run Text="{Binding Title, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
-                                        <Run Text=" will be deleted on save" Foreground="#FFB00000"/>
-                                    </TextBlock>
-                                </DockPanel>
+            <ItemsControl x:Name="AppTabsList" ItemsSource="{Binding AppTabs}" ItemTemplate="{StaticResource TabRowTemplate}"/>
 
-                                <!-- Normal editable row -->
-                                <StackPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
-                                    <DockPanel Margin="0,0,0,8">
-                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                            <Button Content="&#x25B2;" Width="26" Padding="0" Margin="0,0,4,0" ToolTip="Move up"
-                                                    Command="{Binding DataContext.MoveTabUpCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                    CommandParameter="{Binding}"/>
-                                            <Button Content="&#x25BC;" Width="26" Padding="0" Margin="0,0,10,0" ToolTip="Move down"
-                                                    Command="{Binding DataContext.MoveTabDownCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
-                                                    CommandParameter="{Binding}"/>
-                                            <Button Content="Delete" Width="70" Padding="4,2" Background="#FFFDECEA"
-                                                    Visibility="{Binding IsPermanent, Converter={StaticResource InverseBoolToVis}}"
-                                                    Command="{Binding DeleteCommand}"/>
-                                        </StackPanel>
-                                        <CheckBox Content="Visible" DockPanel.Dock="Right" Margin="0,0,16,0" VerticalAlignment="Center"
-                                                  IsChecked="{Binding IsVisible}" IsEnabled="{Binding CanHide}"
-                                                  ToolTip="Settings can't be hidden - it's the only way back into this screen."/>
-                                        <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
-                                    </DockPanel>
+            <!-- Build tabs: GMS/CMS/Live and anything from "+ Add Build Tab". These never show in
+                 the main tab strip (see MainViewModel.IsInTabStrip) - they're picked from the
+                 Launcher and Build Repo dropdowns instead, so there's no Visible checkbox here.
+                 Every one can be deleted except the last one left (see
+                 DraftTabViewModel.IsDeletable/IsLastBuildTab). -->
+            <TextBlock Text="Build Tabs" FontSize="16" FontWeight="Bold" Margin="0,12,0,4"/>
+            <TextBlock TextWrapping="Wrap" Foreground="#FF666666" Margin="0,0,0,12">
+                <Run Text="Build tabs are picked from the Launcher and Build Repo dropdowns rather than the tab strip."/>
+                <Run Text=" Drag (&#x2630;) to change the dropdown order, rename, delete, or add as many as you need."/>
+            </TextBlock>
 
-                                    <!-- Tab icon: disabled entirely for the 5 permanent tabs, which keep whatever icon
-                                         was implemented for them (see DraftTabViewModel.CanCustomizeIcon). Preview
-                                         image + label both show the default derived from Kind/Category (e.g. "App
-                                         Icon" for a brand-new tab) until a custom one is picked - see
-                                         ChooseIconDialog/TabIconCatalog. -->
-                                    <DockPanel Margin="0,0,0,10" Visibility="{Binding CanCustomizeIcon, Converter={StaticResource BoolToVis}}">
-                                        <Border DockPanel.Dock="Left" Width="24" Height="24" Margin="0,0,8,0" VerticalAlignment="Center">
-                                            <Image Source="{Binding IconPreviewSource}" Width="20" Height="20"/>
-                                        </Border>
-                                        <Button DockPanel.Dock="Left" Content="Change Icon..." Width="100" Padding="4,2" Margin="0,0,6,0"
-                                                VerticalAlignment="Center" Command="{Binding ChooseIconCommand}"/>
-                                        <Button DockPanel.Dock="Left" Content="Use Default" Width="90" Padding="4,2"
-                                                VerticalAlignment="Center" Command="{Binding ResetIconCommand}"
-                                                Visibility="{Binding IsCustomIcon, Converter={StaticResource BoolToVis}}"/>
-                                        <TextBlock Text="{Binding IconPreviewLabel}" VerticalAlignment="Center" Foreground="#FF888888" Margin="8,0,0,0"/>
-                                    </DockPanel>
+            <ItemsControl x:Name="BuildTabsList" ItemsSource="{Binding BuildTabs}" ItemTemplate="{StaticResource TabRowTemplate}"/>
 
-                                    <StackPanel Visibility="{Binding IsBuildSection, Converter={StaticResource BoolToVis}}">
-                                        <DockPanel Margin="0,0,0,6">
-                                            <Button Content="Browse..." DockPanel.Dock="Right" Width="90" Command="{Binding BrowseCommand}"/>
-                                            <TextBox Text="{Binding BuildPath}" IsReadOnly="True" Margin="0,0,8,0" VerticalContentAlignment="Center"/>
-                                        </DockPanel>
-                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                            <TextBlock Text="Version Number:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                            <TextBox Text="{Binding VersionNumber, UpdateSourceTrigger=PropertyChanged}" Width="160"/>
-
-                                            <!-- Only shown once this tab has actually been a Pushed to Live source (see
-                                                 TabSettings.LastVersionPushedToLive / BuildSectionViewModel.PushToLiveAsync) and
-                                                 disappears again the moment a new Version Number is typed above (see
-                                                 DraftTabViewModel.VersionNumber's auto-clear) - purely informational, nothing here
-                                                 is editable. -->
-                                            <TextBlock Text="{Binding LastVersionPushedToLiveDisplay}"
-                                                       Visibility="{Binding HasLastVersionPushedToLive, Converter={StaticResource BoolToVis}}"
-                                                       VerticalAlignment="Center" Margin="12,0,0,0" FontStyle="Italic" Foreground="#FF666666"/>
-                                        </StackPanel>
-
-                                        <!-- Only offered while this tab is brand-new (not yet saved) - see
-                                             DraftTabViewModel.CanTogglePushedToLive for why an already-saved tab can't
-                                             flip this after the fact. Once saved, the row disappears; whatever was
-                                             chosen here is locked in for this tab's lifetime. -->
-                                        <CheckBox Content="Enable &quot;Pushed to Live&quot; for this tab" Margin="0,0,0,10"
-                                                  IsChecked="{Binding SupportsPushedToLive}"
-                                                  Visibility="{Binding CanTogglePushedToLive, Converter={StaticResource BoolToVis}}"
-                                                  ToolTip="Lets this tab pull a finished build straight from another tab's Current Build folder instead of only extracting an archive."/>
-
-                                        <!-- Available Servers: this tab's own launch dropdown - built-in entries (seeded
-                                             from LaunchServerCatalog, connect/disconnect only) and custom ones (added via
-                                             "+ Add Custom Server" below, freely editable/removable) side by side. See
-                                             DraftServerViewModel/TabServerEntry. Collapsed by default once a tab already
-                                             has servers configured (see DraftTabViewModel.IsServersExpanded) - expanding/
-                                             collapsing is just view state, not an unsaved change. -->
-                                        <Expander IsExpanded="{Binding IsServersExpanded, Mode=TwoWay}" Margin="0,0,0,0">
-                                            <Expander.Header>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="Available Servers" FontWeight="SemiBold"/>
-                                                    <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
-                                                        <Run Text="("/>
-                                                        <Run Text="{Binding Servers.Count, Mode=OneWay}"/>
-                                                        <Run Text=")"/>
-                                                    </TextBlock>
-                                                </StackPanel>
-                                            </Expander.Header>
-
-                                            <StackPanel Margin="0,8,0,0">
-                                                <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6">
-                                                    <Run Text="Shown here is what this tab's Launch dropdown can offer. Connect/disconnect a built-in server with its checkbox;"/>
-                                                    <Run Text=" add your own below for anything not in the built-in list."/>
-                                                </TextBlock>
-
-                                                <ItemsControl ItemsSource="{Binding Servers}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
-                                                            <Grid>
-                                                                <!-- Marked-for-deletion: compact row + Restore (custom servers only) -->
-                                                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource BoolToVis}}">
-                                                                    <Button Content="Restore" DockPanel.Dock="Right" Width="70" Padding="4,2" Command="{Binding RestoreCommand}"/>
-                                                                    <TextBlock VerticalAlignment="Center">
-                                                                        <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" Foreground="#FF999999" TextDecorations="Strikethrough"/>
-                                                                        <Run Text=" will be removed on save" Foreground="#FFB00000"/>
-                                                                    </TextBlock>
-                                                                </DockPanel>
-
-                                                                <!-- Normal row -->
-                                                                <DockPanel Visibility="{Binding IsMarkedForDeletion, Converter={StaticResource InverseBoolToVis}}">
-                                                                    <CheckBox DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,3,10,0"
-                                                                              IsChecked="{Binding IsEnabled}"
-                                                                              ToolTip="Connected - included in this tab's Launch dropdown"/>
-                                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top"
-                                                                                Visibility="{Binding IsBuiltIn, Converter={StaticResource InverseBoolToVis}}">
-                                                                        <Button Content="Edit" Width="50" Padding="0,2" Margin="0,0,4,0" Command="{Binding EditCommand}"/>
-                                                                        <Button Content="Remove" Width="64" Padding="0,2" Background="#FFFDECEA" Command="{Binding DeleteCommand}"/>
-                                                                    </StackPanel>
-                                                                    <StackPanel>
-                                                                        <StackPanel Orientation="Horizontal">
-                                                                            <TextBlock Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold"/>
-                                                                            <!-- Run has no Visibility property (it's not a UIElement) - a separate TextBlock is
-                                                                                 needed so this tag can be hidden for a custom entry. -->
-                                                                            <TextBlock Text=" (Built-in)" Foreground="#FF999999" FontStyle="Italic" Margin="4,0,0,0"
-                                                                                       Visibility="{Binding IsBuiltIn, Converter={StaticResource BoolToVis}}"/>
-                                                                        </StackPanel>
-                                                                        <TextBlock Text="{Binding LaunchArgumentPreview, Mode=OneWay}" FontSize="11" Foreground="#FF888888"/>
-                                                                    </StackPanel>
-                                                                </DockPanel>
-                                                            </Grid>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-
-                                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                                    <Button Content="+ Add Custom Server" Width="150" Padding="6,4" HorizontalAlignment="Left"
-                                                            Command="{Binding AddCustomServerCommand}"/>
-                                                    <!-- Pulls from LaunchServerCatalog (GMS/CMS/Live) instead of the user having to look
-                                                         up IPs/ports and retype them one at a time - see DraftTabViewModel.
-                                                         ImportBuiltInServersCommand/ImportBuiltInServersDialog. Offered on every tab, not
-                                                         just one whose Category matches, since any catalog can be borrowed from. -->
-                                                    <Button Content="+ Import Built-In Servers" Width="170" Padding="6,4" HorizontalAlignment="Left" Margin="8,0,0,0"
-                                                            Command="{Binding ImportBuiltInServersCommand}"/>
-                                                </StackPanel>
-                                            </StackPanel>
-                                        </Expander>
-
-                                        <!-- Available Executables: every .exe found sitting in this tab's build folder
-                                             (see Helpers.ExecutableScanner/DraftTabViewModel.RescanExecutables), checked
-                                             ones feeding this tab's Select Executable dropdown (BuildSectionViewModel.
-                                             ExecutableOptions). Replaces the old fixed MapleStory.exe/MapleStoryA.exe-only
-                                             list - there's no Add/Edit/Remove here since nothing is typed in by hand,
-                                             only discovered, so the checkbox is the only control. Re-scanned every time
-                                             Browse... picks a folder, and again whenever Settings is reopened, so this
-                                             always reflects what's actually on disk right now. -->
-                                        <Expander IsExpanded="{Binding IsExecutablesExpanded, Mode=TwoWay}" Margin="0,8,0,0">
-                                            <Expander.Header>
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="Available Executables" FontWeight="SemiBold"/>
-                                                    <TextBlock Foreground="#FF888888" Margin="6,0,0,0">
-                                                        <Run Text="("/>
-                                                        <Run Text="{Binding Executables.Count, Mode=OneWay}"/>
-                                                        <Run Text=")"/>
-                                                    </TextBlock>
-                                                </StackPanel>
-                                            </Expander.Header>
-
-                                            <StackPanel Margin="0,8,0,0">
-                                                <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,0,0,6"
-                                                           Visibility="{Binding HasBuildPath, Converter={StaticResource BoolToVis}}">
-                                                    <Run Text="Every .exe found in this tab's build folder is listed below. Check the ones you want"/>
-                                                    <Run Text=" to be able to pick from the Select Executable dropdown."/>
-                                                </TextBlock>
-                                                <TextBlock Text="Select a build folder above to scan it for executables."
-                                                           TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6"
-                                                           Visibility="{Binding HasBuildPath, Converter={StaticResource InverseBoolToVis}}"/>
-                                                <TextBlock Text="No .exe files were found directly in this folder."
-                                                           TextWrapping="Wrap" Foreground="#FF999999" FontSize="11" FontStyle="Italic" Margin="0,0,0,6">
-                                                    <TextBlock.Style>
-                                                        <Style TargetType="TextBlock">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                            <Style.Triggers>
-                                                                <MultiDataTrigger>
-                                                                    <MultiDataTrigger.Conditions>
-                                                                        <Condition Binding="{Binding HasBuildPath}" Value="True"/>
-                                                                        <Condition Binding="{Binding Executables.Count}" Value="0"/>
-                                                                    </MultiDataTrigger.Conditions>
-                                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                                </MultiDataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </TextBlock.Style>
-                                                </TextBlock>
-
-                                                <ItemsControl ItemsSource="{Binding Executables}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border BorderBrush="#FFE0E0E0" BorderThickness="0,0,0,1" Padding="0,6">
-                                                                <CheckBox Content="{Binding FileName, Mode=OneWay}"
-                                                                          IsChecked="{Binding IsEnabled}"
-                                                                          ToolTip="Available in this tab's Select Executable dropdown"/>
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </StackPanel>
-                                        </Expander>
-                                    </StackPanel>
-                                </StackPanel>
-                            </StackPanel>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
-
-            <!-- No more GMS/CMS/Live picker - extras are independent top-level tabs now, not
-                 nested under a parent category, so there's nothing to choose here. One click adds
-                 a plain build-section row below with Title/BuildPath/VersionNumber ready to fill
-                 in (see SettingsViewModel.AddTab). -->
-            <Button Content="+ Add Tab" Width="120" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12"
+            <!-- One click adds a plain build-section row to the Build Tabs list above with
+                 Title/BuildPath/VersionNumber ready to fill in (see SettingsViewModel.AddTab). -->
+            <Button Content="+ Add Build Tab" Width="140" Padding="8,4" HorizontalAlignment="Left" Margin="0,0,0,12"
                     Command="{Binding AddTabCommand}"/>
 
             <!-- App-level (not per-tab) setting - see SettingsViewModel.RunAsAdministrator /

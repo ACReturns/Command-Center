@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
@@ -108,6 +108,11 @@ namespace CommandCenter.Model
         // MaintenanceVerificationViewModel.NewestFirst. An existing settings.json without this key
         // just deserializes it to false, matching prior behavior exactly.
         public bool MaintenanceNewestFirst { get; set; } = false;
+
+        // Live build folder the Maintenance Version Verification tab verifies against - picked by the
+        // user with the tab's "Browse..." button (replaces the old installed-build-tab dropdown) and
+        // saved immediately so it's still set the next time the app opens. Null/blank = not set yet.
+        public string? MaintenanceLiveBuildPath { get; set; }
 
         // Root Google Drive folder the Build Repo tab lists versions from (each version folder holds
         // a "Build" subfolder whose children are the downloadable builds - see BuildRepoDefaults /

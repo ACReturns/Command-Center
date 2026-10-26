@@ -17,10 +17,15 @@ using System.Windows.Threading;
 using CommandCenter.Model;
 using CommandCenter.Services;
 using CommandCenter.View;
+using Microsoft.Win32;
 
 namespace CommandCenter.ViewModel
 {
-    /// <summary>A build tab the user has set up (BuildSection with a Build Path) - the "installed version" picker.</summary>
+    /// <summary>
+    /// The live build folder being verified. Comes from the user-browsed path
+    /// (AppSettings.MaintenanceLiveBuildPath); TabId is the matching build tab's Id when the folder
+    /// is also some build tab's Build Path (so Title/Version can borrow that tab's), else Guid.Empty.
+    /// </summary>
     public sealed record InstalledBuildOption(Guid TabId, string Title, string Version, string BuildPath)
     {
         public string Display => string.IsNullOrWhiteSpace(Version) ? $"{Title}  (no version set)" : $"{Title}  -  {Version}";
@@ -118,6 +123,11 @@ namespace CommandCenter.ViewModel
                 _ => !IsBusy && SelectedRow?.HasChecksumLink == true);
             VerifyCommand = new MaintenanceCommand(_ => VerifySelectedAsync(),
                 _ => !IsBusy && SelectedRow?.IsDownloaded == true && SelectedBuild != null);
+            BrowseLiveBuildCommand = new MaintenanceCommand(_ =>
+            {
+                BrowseLiveBuild();
+                return Task.CompletedTask;
+            }, _ => !IsBusy);
             CancelCommand = new MaintenanceCommand(_ =>
             {
                 _cts?.Cancel();
@@ -134,13 +144,34 @@ namespace CommandCenter.ViewModel
 
         public ObservableCollection<ChecksumRowViewModel> Rows { get; } = new();
         public ICollectionView RowsView { get; }
-        public ObservableCollection<InstalledBuildOption> InstalledBuilds { get; } = new();
         public ObservableCollection<ChecksumFileResult> Results { get; } = new();
         public ObservableCollection<string> Extras { get; } = new();
 
         public string ResultsHeader => Results.Count == 0 ? "Results" : $"Results ({Results.Count:N0})";
         public string ExtrasHeader => Extras.Count == 0 ? "Extras" : $"Extras ({Extras.Count:N0})";
-        public bool HasInstalledBuilds => InstalledBuilds.Count > 0;
+
+        /// <summary>The saved live build folder, or a prompt when none has been picked yet.</summary>
+        public string LiveBuildPathDisplay =>
+            string.IsNullOrWhiteSpace(_appSettings.MaintenanceLiveBuildPath)
+                ? "No live build folder set - click Browse..."
+                : _appSettings.MaintenanceLiveBuildPath!;
+
+        /// <summary>What version the picked folder resolved to (from a matching build tab or the folder name).</summary>
+        public string LiveBuildInfo
+        {
+            get
+            {
+                var b = SelectedBuild;
+                if (b == null)
+                    return string.IsNullOrWhiteSpace(_appSettings.MaintenanceLiveBuildPath)
+                        ? string.Empty
+                        : "Folder not found - browse to it again.";
+                var source = b.TabId != Guid.Empty ? $"from tab \"{b.Title}\"" : "from folder name";
+                return string.IsNullOrWhiteSpace(b.Version)
+                    ? "Version: not detected - pick the checksum row manually."
+                    : $"Version: {b.Version} ({source})";
+            }
+        }
 
         public ChecksumRowViewModel? SelectedRow
         {
@@ -160,6 +191,7 @@ namespace CommandCenter.ViewModel
             set
             {
                 if (!Set(ref _selectedBuild, value)) return;
+                OnPropertyChanged(nameof(LiveBuildInfo));
                 AutoSelectRowForBuild();
                 CommandManager.InvalidateRequerySuggested();
             }
@@ -223,6 +255,7 @@ namespace CommandCenter.ViewModel
         public ICommand VerifyCommand { get; }
         public ICommand CancelCommand { get; }
         public ICommand OpenChecksumsFolderCommand { get; }
+        public ICommand BrowseLiveBuildCommand { get; }
 
         private string SheetUrl =>
             string.IsNullOrWhiteSpace(_appSettings.MaintenanceSheetUrl)
@@ -251,31 +284,81 @@ namespace CommandCenter.ViewModel
         }
 
         /// <summary>
-        /// Rebuilds the installed-build picker from the user's current tab setup. Every build tab with
-        /// a Build Path is offered, visible or hidden - build tabs can be hidden in Settings and
-        /// driven from the Launcher / Build Repo tabs instead, so visibility doesn't matter here.
-        /// Runs on every OnActivated, so a tab created in Settings shows up next time this tab opens.
+        /// Resolves the saved live build folder (AppSettings.MaintenanceLiveBuildPath) into
+        /// SelectedBuild. Runs on every OnActivated so a folder that was moved/deleted, or a build
+        /// tab whose version changed, is picked up next time this tab opens. Version comes from a
+        /// build tab pointing at the same folder if there is one, otherwise from the folder name
+        /// (e.g. "...\v271.2.0\Client" -> 271.2.0).
         /// </summary>
         public void RefreshInstalledBuilds()
         {
-            var previousTabId = _selectedBuild?.TabId;
-
-            var builds = _tabsProvider()
-                .Where(t => t.Kind == TabKind.BuildSection && !string.IsNullOrWhiteSpace(t.BuildPath))
-                .OrderBy(t => t.Order)
-                .Select(t => new InstalledBuildOption(t.Id, t.Title ?? string.Empty, t.VersionNumber ?? string.Empty, t.BuildPath!))
-                .ToList();
-
-            InstalledBuilds.Clear();
-            foreach (var build in builds) InstalledBuilds.Add(build);
-            OnPropertyChanged(nameof(HasInstalledBuilds));
-
-            // Restore the previous pick without re-running auto-select (keeps a manual row choice intact).
-            _selectedBuild = InstalledBuilds.FirstOrDefault(b => b.TabId == previousTabId);
+            var previous = _selectedBuild;
+            _selectedBuild = ResolveLiveBuild(_appSettings.MaintenanceLiveBuildPath);
             OnPropertyChanged(nameof(SelectedBuild));
+            OnPropertyChanged(nameof(LiveBuildPathDisplay));
+            OnPropertyChanged(nameof(LiveBuildInfo));
+
+            // Only re-run auto-select when the build actually changed, so a manual row choice survives tab switches.
+            if (_selectedBuild != null && _selectedBuild != previous) AutoSelectRowForBuild();
 
             UpdateInstalledOn();
             CommandManager.InvalidateRequerySuggested();
+        }
+
+        private void BrowseLiveBuild()
+        {
+            var current = _appSettings.MaintenanceLiveBuildPath;
+            var dialog = new OpenFolderDialog
+            {
+                Title = "Select the live build folder to verify",
+                InitialDirectory = !string.IsNullOrWhiteSpace(current) && Directory.Exists(current)
+                    ? current
+                    : Environment.GetFolderPath(Environment.SpecialFolder.Desktop)
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            _appSettings.MaintenanceLiveBuildPath = dialog.FolderName;
+            _settingsService.Save(_appSettings);
+            RefreshInstalledBuilds();
+            StatusText = $"Live build folder set: {dialog.FolderName}";
+        }
+
+        private InstalledBuildOption? ResolveLiveBuild(string? path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path)) return null;
+
+            var full = NormalizePath(path);
+            var tab = _tabsProvider().FirstOrDefault(t =>
+                t.Kind == TabKind.BuildSection &&
+                !string.IsNullOrWhiteSpace(t.BuildPath) &&
+                string.Equals(NormalizePath(t.BuildPath!), full, StringComparison.OrdinalIgnoreCase));
+
+            if (tab != null && !string.IsNullOrWhiteSpace(tab.VersionNumber))
+                return new InstalledBuildOption(tab.Id, tab.Title ?? string.Empty, tab.VersionNumber!, path);
+
+            var folderName = Path.GetFileName(full);
+            if (string.IsNullOrEmpty(folderName)) folderName = full;
+            return new InstalledBuildOption(Guid.Empty, folderName, VersionFromPath(full), path);
+        }
+
+        private static string NormalizePath(string path)
+        {
+            try { return Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+            catch { return path.Trim().TrimEnd('\\', '/'); }
+        }
+
+        // Walks the path from the leaf folder upward and returns the first "271.2.0"-style version found
+        // in a folder name, so "D:\Builds\v271.2.0\Client" still resolves. Empty if none.
+        private static string VersionFromPath(string path)
+        {
+            var dir = new DirectoryInfo(path);
+            while (dir != null)
+            {
+                var m = Regex.Match(dir.Name, @"\d+\.\d+(?:\.\d+)+");
+                if (m.Success) return m.Value;
+                dir = dir.Parent;
+            }
+            return string.Empty;
         }
 
         // ---------- Sheet ----------
@@ -536,10 +619,12 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
-            if (ChecksumSheetParser.NormalizeVersion(build.Version) != ChecksumSheetParser.NormalizeVersion(row.Version))
+            // No detectable version on the browsed folder = nothing to compare against, so don't nag.
+            if (!string.IsNullOrWhiteSpace(build.Version) &&
+                ChecksumSheetParser.NormalizeVersion(build.Version) != ChecksumSheetParser.NormalizeVersion(row.Version))
             {
                 var answer = MessageBox.Show(
-                    $"\"{build.Title}\" is set to {(string.IsNullOrWhiteSpace(build.Version) ? "no version" : build.Version)}, " +
+                    $"\"{build.Title}\" looks like {build.Version}, " +
                     $"but the selected checksum is for {row.Version}.\n\nVerify anyway?",
                     "Version mismatch", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No);
                 if (answer != MessageBoxResult.Yes) return;
@@ -694,9 +779,11 @@ namespace CommandCenter.ViewModel
             foreach (var row in Rows)
             {
                 var version = ChecksumSheetParser.NormalizeVersion(row.Version);
-                row.InstalledOn = string.Join(", ", InstalledBuilds
-                    .Where(b => ChecksumSheetParser.NormalizeVersion(b.Version) == version)
-                    .Select(b => b.Title));
+                var build = _selectedBuild;
+                row.InstalledOn = build != null && version.Length > 0 &&
+                                  ChecksumSheetParser.NormalizeVersion(build.Version) == version
+                    ? "Live folder"
+                    : string.Empty;
             }
         }
 
