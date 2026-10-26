@@ -201,6 +201,7 @@ namespace CommandCenter.ViewModel
         private BuildRepoNode? _selectedNode;
         private BuildRepoTargetOption? _selectedTarget;
         private bool _extractAfterDownload;
+        private bool _patchAfterDownload;
         private bool _isBusy;
         private bool _needsSignIn;
         private bool _isProgressIndeterminate;
@@ -216,6 +217,8 @@ namespace CommandCenter.ViewModel
             _tabsProvider = tabsProvider;
             _findBuildSection = findBuildSection;
             _extractAfterDownload = appSettings.BuildRepoExtractAfterDownload;
+            // The two modes are exclusive - if an older/hand-edited settings.json has both on, New Build wins.
+            _patchAfterDownload = appSettings.BuildRepoPatchAfterDownload && !_extractAfterDownload;
 
             _root = CreateRoot();
             RootNodes.Add(_root);
@@ -284,19 +287,54 @@ namespace CommandCenter.ViewModel
 
         public bool TargetHasNoBuildPath => SelectedTarget != null && !SelectedTarget.HasBuildPath;
 
+        /// <summary>
+        /// "New Build" checkbox: download, then extract - Full_*.zip replaces the build (New Build),
+        /// everything else is applied on top (Patch). Unchecks "Patch" when turned on.
+        /// </summary>
         public bool ExtractAfterDownload
         {
             get => _extractAfterDownload;
             set
             {
                 if (!SetProperty(ref _extractAfterDownload, value)) return;
+                if (value && _patchAfterDownload)
+                {
+                    _patchAfterDownload = false;
+                    _appSettings.BuildRepoPatchAfterDownload = false;
+                    OnPropertyChanged(nameof(PatchAfterDownload));
+                }
                 OnPropertyChanged(nameof(DownloadButtonText));
                 _appSettings.BuildRepoExtractAfterDownload = value;
                 TrySaveSettings();
             }
         }
 
-        public string DownloadButtonText => ExtractAfterDownload ? "Download & Extract" : "Download";
+        /// <summary>
+        /// "Patch" checkbox: download, then apply EVERY archive (Full_* included) with the build tabs'
+        /// Patch function - the existing build is never wiped, files are overlaid on top of it.
+        /// Unchecks "New Build" when turned on.
+        /// </summary>
+        public bool PatchAfterDownload
+        {
+            get => _patchAfterDownload;
+            set
+            {
+                if (!SetProperty(ref _patchAfterDownload, value)) return;
+                if (value && _extractAfterDownload)
+                {
+                    _extractAfterDownload = false;
+                    _appSettings.BuildRepoExtractAfterDownload = false;
+                    OnPropertyChanged(nameof(ExtractAfterDownload));
+                }
+                OnPropertyChanged(nameof(DownloadButtonText));
+                _appSettings.BuildRepoPatchAfterDownload = value;
+                TrySaveSettings();
+            }
+        }
+
+        public string DownloadButtonText => ExtractAfterDownload ? "Download & New Build"
+            : PatchAfterDownload ? "Download & Patch"
+            : "Download";
 
         public bool CanDownload => !IsBusy && SelectedNode?.CanDownload == true && SelectedTarget?.HasBuildPath == true;
 
@@ -582,7 +620,8 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
-            var extract = ExtractAfterDownload;
+            var patchOnly = PatchAfterDownload;           // "Patch" checkbox - never wipe the build
+            var extract = ExtractAfterDownload || patchOnly;
             var buildPath = target.BuildPath;
             var externalUpdateStarted = false;
             string? stagingRoot = null;
@@ -625,6 +664,7 @@ namespace CommandCenter.ViewModel
                         return;
                     }
                     extract = false;
+                    patchOnly = false;
                 }
 
                 // 3. Confirm. Extraction with a Full_* archive replaces the whole build.
@@ -634,8 +674,19 @@ namespace CommandCenter.ViewModel
                     ? BuildRepoDefaults.IsFullArchive(node.Name)
                     : fullNames.Count > 0;
 
+                // In Patch mode a Full_* archive is just overlaid like any other patch - nothing is wiped.
+                if (patchOnly) hasFull = false;
+
                 string confirmText;
-                if (extract && hasFull)
+                if (patchOnly)
+                {
+                    confirmText = $"Download {files.Count} file(s) from {node.Name} and PATCH the existing {target.Title} build at:\n{buildPath}\n\n" +
+                                  (fullNames.Count > 0 || (node.Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsFullArchive(node.Name))
+                                      ? "Full_* archive(s) are overlaid on top of the current build instead of replacing it.\n" : "") +
+                                  "Everything is applied exactly like the Patch button (Partial Client folders merged in order, nested archives unpacked, AdminClient/Bin flattened). " +
+                                  "Existing files are kept - only files with the same names are overwritten.\n\nContinue?";
+                }
+                else if (extract && hasFull)
                 {
                     confirmText = $"Download {files.Count} file(s) from {node.Name}, then REPLACE the existing {target.Title} build at:\n{buildPath}\n\n" +
                                   $"1. {(fullNames.Count > 0 ? fullNames[0] : node.Name)} - applied exactly like New Build.\n" +
@@ -660,7 +711,7 @@ namespace CommandCenter.ViewModel
                         $"\n\n{target.Title}'s Version Number will be set to {versionLabel} once it finishes.\n\nContinue?");
                 }
 
-                if (MessageBox.Show(confirmText, extract && hasFull ? "Confirm Download & New Build" : "Confirm Download",
+                if (MessageBox.Show(confirmText, extract && hasFull ? "Confirm Download & New Build" : patchOnly ? "Confirm Download & Patch" : "Confirm Download",
                         MessageBoxButton.YesNo, extract && hasFull ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
                 {
                     StatusText = "Download cancelled.";
@@ -723,7 +774,8 @@ namespace CommandCenter.ViewModel
                 //      checksums.md5, ...) is applied like Patch applied to an archive of that folder
                 //      (BuildUpdateService.RunPatchFromFolderAsync - same Partial Client resolution,
                 //      numbered-folder merge, nested-archive unwrapping and AdminClient/Bin flattening).
-                buildVm?.BeginExternalUpdate($"Build Repo: extracting {node.Name}...");
+                Log(patchOnly ? "Mode: Patch (existing build is kept)." : "Mode: New Build.");
+                buildVm?.BeginExternalUpdate($"Build Repo: {(patchOnly ? "patching" : "extracting")} {node.Name}...");
                 externalUpdateStarted = true;
 
                 var steps = new List<(string Label, Func<IProgress<UpdateProgress>, Task> Run)>();
@@ -732,7 +784,7 @@ namespace CommandCenter.ViewModel
                 if (node.Kind == BuildRepoNodeKind.File)
                 {
                     var file = downloaded[0];
-                    var mode = BuildRepoDefaults.IsFullArchive(file) ? UpdateMode.NewBuild : UpdateMode.Patch;
+                    var mode = !patchOnly && BuildRepoDefaults.IsFullArchive(file) ? UpdateMode.NewBuild : UpdateMode.Patch;
                     steps.Add(($"{(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetFileName(file)}",
                         p => BuildUpdateService.RunAsync(file, buildPath, mode, p, ct)));
                 }
@@ -745,7 +797,7 @@ namespace CommandCenter.ViewModel
                     for (int k = 0; k < fullArchives.Count; k++)
                     {
                         var full = fullArchives[k];
-                        var mode = k == 0 ? UpdateMode.NewBuild : UpdateMode.Patch;
+                        var mode = k == 0 && !patchOnly ? UpdateMode.NewBuild : UpdateMode.Patch;
                         steps.Add(($"{(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetFileName(full)}", async p =>
                         {
                             await BuildUpdateService.RunAsync(full, buildPath, mode, p, ct);
@@ -761,7 +813,9 @@ namespace CommandCenter.ViewModel
                         }
                         else
                         {
-                            Log("  Nothing left to patch after the Full_* archive (only checksum files) - skipped.");
+                            Log(fullArchives.Count > 0
+                                ? "  Nothing left to patch after the Full_* archive (only checksum files) - skipped."
+                                : "  Nothing to patch (only checksum files) - skipped.");
                         }
                     }));
                 }
@@ -802,7 +856,7 @@ namespace CommandCenter.ViewModel
                 CleanupEmptyStagingParents(stagingRoot!);
 
                 ProgressPercent = 100;
-                var doneText = $"{node.Name} extracted into {target.Title}. Ready to launch.";
+                var doneText = $"{node.Name} {(patchOnly ? "patched into" : "extracted into")} {target.Title}. Ready to launch.";
                 StatusText = doneText;
                 Log("Done. Downloaded files removed from the staging folder.");
                 buildVm?.EndExternalUpdate(doneText, succeeded: true);

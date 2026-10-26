@@ -102,7 +102,12 @@
         </Style>
     </UserControl.Resources>
 
-    <Grid Margin="12">
+    <!-- Auto-fit: the grid fills the visible area (Height = viewport), but never shrinks below what
+         every element needs (MinHeight, kept up to date in code-behind). On first show the window
+         grows to fit that; if the screen is too small for it, this scrolls instead of clipping. -->
+    <ScrollViewer x:Name="RootScroll" Padding="12" Focusable="False"
+                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <Grid x:Name="RootGrid" Height="{Binding ViewportHeight, ElementName=RootScroll}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*" MinHeight="180"/>
@@ -111,7 +116,7 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <DockPanel Grid.Row="0" Margin="0,0,0,8">
+        <DockPanel x:Name="HeaderPanel" Grid.Row="0" Margin="0,0,0,8">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                 <Button Content="Sign in to Google" Command="{Binding SignInCommand}" Style="{StaticResource SignInButton}"/>
                 <Button Content="Refresh" Command="{Binding RefreshCommand}" Style="{StaticResource ToolbarButton}"/>
@@ -164,7 +169,8 @@
         </Border>
 
         <!-- Download panel -->
-        <Border Grid.Row="2" BorderBrush="#33000000" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,8">
+        <Border x:Name="DownloadPanel" Grid.Row="2" BorderBrush="#33000000" BorderThickness="1" CornerRadius="4" Padding="10" Margin="0,8"
+                SizeChanged="DownloadPanel_SizeChanged">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -202,13 +208,23 @@
                     </TextBlock.Style>
                 </TextBlock>
 
-                <CheckBox Grid.Row="3" Grid.Column="1" Margin="0,2,0,8" IsChecked="{Binding ExtractAfterDownload, Mode=TwoWay}"
-                          IsEnabled="{Binding IsNotBusy}">
-                    <TextBlock TextWrapping="Wrap">
-                        <Run Text="Extract after download" FontWeight="SemiBold"/>
-                        <Run Text=" - Full_*.zip is applied like New Build (replaces the build), then the rest (Partial Client folders / Partial_*.zip) is applied like the Patch button. Unchecked = just download the files into the Current Build directory." Foreground="#FF666666"/>
-                    </TextBlock>
-                </CheckBox>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="After download:" FontWeight="SemiBold" Margin="0,2,10,8" VerticalAlignment="Top"/>
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,2,0,8">
+                    <!-- The two are exclusive (checking one unchecks the other in the view model); neither = plain download. -->
+                    <CheckBox IsChecked="{Binding ExtractAfterDownload, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}" Margin="0,0,0,6">
+                        <TextBlock TextWrapping="Wrap">
+                            <Run Text="New Build" FontWeight="SemiBold"/>
+                            <Run Text=" - Downloads the files, extracts them, then applies Full_*.zip exactly like the New Build button (the current build is DELETED and replaced). Anything else (Partial Client folders / Partial_*.zip) is then applied on top like Patch." Foreground="#FF666666"/>
+                        </TextBlock>
+                    </CheckBox>
+                    <CheckBox IsChecked="{Binding PatchAfterDownload, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}" Margin="0,0,0,6">
+                        <TextBlock TextWrapping="Wrap">
+                            <Run Text="Patch" FontWeight="SemiBold"/>
+                            <Run Text=" - Downloads the files, extracts them, then applies everything (Full_*.zip included) exactly like the Patch button: the current build is KEPT and new files are copied over it, overwriting only files with the same name. Partial Client folders are merged in order, nested archives unpacked, AdminClient/Bin flattened." Foreground="#FF666666"/>
+                        </TextBlock>
+                    </CheckBox>
+                    <TextBlock Text="Neither checked = just download the files into the Current Build directory, no extraction." Foreground="#FF666666" FontStyle="Italic" TextWrapping="Wrap"/>
+                </StackPanel>
 
                 <DockPanel Grid.Row="4" Grid.ColumnSpan="2">
                     <Button DockPanel.Dock="Left" Content="{Binding DownloadButtonText}" Command="{Binding DownloadCommand}"
@@ -230,4 +246,5 @@
                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="NoWrap"
                  TextChanged="Log_TextChanged"/>
     </Grid>
+    </ScrollViewer>
 </UserControl>

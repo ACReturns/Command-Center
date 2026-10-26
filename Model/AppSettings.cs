@@ -116,7 +116,13 @@ namespace CommandCenter.Model
         public string BuildRepoFolderUrl { get; set; } = BuildRepoDefaults.RootFolderUrl;
 
         // Build Repo tab's "Extract after download" checkbox - remembered between sessions.
+        // (Shown as "New Build" in the UI.)
         public bool BuildRepoExtractAfterDownload { get; set; } = false;
+
+        // Build Repo tab's "Patch" checkbox (extract after download and apply everything as a Patch -
+        // never wipes the existing build). Mutually exclusive with BuildRepoExtractAfterDownload;
+        // remembered between sessions.
+        public bool BuildRepoPatchAfterDownload { get; set; } = false;
 
         // Build Repo tab's last-picked "Download for tab" target (TabSettings.Id), restored on launch.
         public Guid? BuildRepoLastTargetTabId { get; set; }
