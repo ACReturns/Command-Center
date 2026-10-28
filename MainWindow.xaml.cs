@@ -8,6 +8,10 @@ namespace CommandCenter
         public MainWindow()
         {
             InitializeComponent();
+
+            // Elevated (Run as Administrator) windows don't receive Explorer drag-drop through
+            // WPF - this re-enables it for the Documents panels. No-op when not elevated.
+            ElevatedFileDropBridge.Attach(this);
             StateChanged += (_, _) => UpdateMaximizeRestoreToolTip();
             UpdateMaximizeRestoreToolTip();
         }

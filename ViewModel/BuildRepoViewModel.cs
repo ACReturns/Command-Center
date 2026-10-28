@@ -36,8 +36,12 @@ namespace CommandCenter.ViewModel
         private bool _isSelected;
         private bool _isLoading;
 
+        private readonly Action<BuildRepoNode>? _onBatchToggled;
+        private bool _isBatchChecked;
+
         public BuildRepoNode(BuildRepoNodeKind kind, string name, string? driveId, BuildRepoNode? parent,
-            Func<BuildRepoNode, Task>? loader = null, Action<BuildRepoNode>? onSelected = null)
+            Func<BuildRepoNode, Task>? loader = null, Action<BuildRepoNode>? onSelected = null,
+            Action<BuildRepoNode>? onBatchToggled = null)
         {
             Kind = kind;
             Name = name;
@@ -45,6 +49,51 @@ namespace CommandCenter.ViewModel
             Parent = parent;
             _loader = loader;
             _onSelected = onSelected;
+            _onBatchToggled = onBatchToggled;
+        }
+
+        // "Partial", "Partial 2", "Partial 1 10/28", "Partial_3", "Partial Client"... - but not "Partials".
+        private static readonly System.Text.RegularExpressions.Regex PartialFolderPattern =
+            new(@"^\s*Partial(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // "Full", "Full Client", "Full 10/28", "Full_Client"... - but not "Fullscreen".
+        private static readonly System.Text.RegularExpressions.Regex FullFolderPattern =
+            new(@"^\s*Full(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        /// <summary>A Full folder inside a build - always applied before any Partial in a batch.</summary>
+        public bool IsFullFolder => Kind == BuildRepoNodeKind.Folder && FullFolderPattern.IsMatch(Name);
+
+        /// <summary>
+        /// A Full or Partial folder inside a build - these get a checkbox so several can be
+        /// batch-downloaded and applied one after another (Full first, then tree order) in one run.
+        /// </summary>
+        public bool IsBatchEligible => Kind == BuildRepoNodeKind.Folder && DriveId != null && BuildAncestor != null
+                                       && (PartialFolderPattern.IsMatch(Name) || FullFolderPattern.IsMatch(Name));
+
+        public bool IsBatchChecked
+        {
+            get => _isBatchChecked;
+            set
+            {
+                if (SetProperty(ref _isBatchChecked, value)) _onBatchToggled?.Invoke(this);
+            }
+        }
+
+        /// <summary>Unchecks without notifying the view model (used when it clears/replaces the batch itself).</summary>
+        public void ClearBatchSilently()
+        {
+            if (!_isBatchChecked) return;
+            _isBatchChecked = false;
+            OnPropertyChanged(nameof(IsBatchChecked));
+        }
+
+        public bool IsAncestorOf(BuildRepoNode other)
+        {
+            for (var n = other.Parent; n != null; n = n.Parent)
+            {
+                if (ReferenceEquals(n, this)) return true;
+            }
+            return false;
         }
 
         public BuildRepoNodeKind Kind { get; }
@@ -208,6 +257,8 @@ namespace CommandCenter.ViewModel
         private double _progressPercent;
         private string _statusText = string.Empty;
         private string _logText = string.Empty;
+        private bool _isAwaitingResume;
+        private TaskCompletionSource<bool>? _resumeDecision;
 
         public BuildRepoViewModel(AppSettings appSettings, SettingsService settingsService,
             Func<IEnumerable<TabSettings>> tabsProvider, Func<Guid, BuildSectionViewModel?> findBuildSection)
@@ -227,8 +278,10 @@ namespace CommandCenter.ViewModel
             SignInCommand = new AsyncRelayCommand(_ => SignInAsync(), _ => !IsBusy);
             DownloadCommand = new AsyncRelayCommand(_ => DownloadSelectedAsync(), _ => CanDownload);
             CancelCommand = new RelayCommand(_ => _cts?.Cancel(), _ => IsBusy);
+            ResumeCommand = new RelayCommand(_ => _resumeDecision?.TrySetResult(true), _ => IsAwaitingResume);
             OpenBuildFolderCommand = new RelayCommand(_ => OpenFolder(SelectedTarget?.BuildPath),
                 _ => SelectedTarget?.HasBuildPath == true);
+            ClearBatchCommand = new RelayCommand(_ => ClearBatch(), _ => IsBatchMode && !IsBusy);
         }
 
         // ---------- Bindable state ----------
@@ -255,11 +308,87 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public string SelectionText => SelectedNode == null
-            ? "Nothing selected - pick a build (e.g. 1TC), a folder inside one, or a single file."
-            : SelectedNode.CanDownload
-                ? SelectedNode.Breadcrumb
-                : $"{SelectedNode.Breadcrumb}   (pick a build, folder or file below this to download)";
+        public string SelectionText => IsBatchMode
+            ? $"Batch ({_batch.Count}), applied in this order:  {_batch[0].BuildAncestor?.Breadcrumb}  ›  " +
+              string.Join("  →  ", _batch.Select(n => n.Name))
+            : SelectedNode == null
+                ? "Nothing selected - pick a build (e.g. 1TC), a folder inside one, or a single file. Tick several Full/Partial folders to batch them."
+                : SelectedNode.CanDownload
+                    ? SelectedNode.Breadcrumb
+                    : $"{SelectedNode.Breadcrumb}   (pick a build, folder or file below this to download)";
+
+        // ---------- Batch (several Full/Partial folders of one build) ----------
+
+        // Checked Full/Partial folders: Full first, then tree order (= the order they get applied).
+        private readonly List<BuildRepoNode> _batch = new();
+
+        /// <summary>True once any Full/Partial folder is ticked - the download then uses the ticked folders, not the highlighted row.</summary>
+        public bool IsBatchMode => _batch.Count > 0;
+
+        private void OnBatchToggled(BuildRepoNode node)
+        {
+            if (node.IsBatchChecked)
+            {
+                // Same build only - ticking a folder under a different build starts a new batch.
+                var build = node.BuildAncestor;
+                var dropped = _batch.Where(n => !ReferenceEquals(n.BuildAncestor, build)
+                                                || n.IsAncestorOf(node) || node.IsAncestorOf(n)).ToList();
+                foreach (var d in dropped)
+                {
+                    d.ClearBatchSilently();
+                    _batch.Remove(d);
+                }
+                if (dropped.Any(d => !ReferenceEquals(d.BuildAncestor, build)))
+                {
+                    StatusText = $"Batch reset - batched folders have to come from the same build ({build?.Name}).";
+                }
+                if (!_batch.Contains(node)) _batch.Add(node);
+                _batch.Sort(CompareTreeOrder);
+            }
+            else
+            {
+                _batch.Remove(node);
+            }
+            OnBatchChanged();
+        }
+
+        private void ClearBatch()
+        {
+            foreach (var n in _batch) n.ClearBatchSilently();
+            _batch.Clear();
+            OnBatchChanged();
+        }
+
+        private void OnBatchChanged()
+        {
+            OnPropertyChanged(nameof(IsBatchMode));
+            OnPropertyChanged(nameof(SelectionText));
+            OnPropertyChanged(nameof(CanDownload));
+            OnPropertyChanged(nameof(DownloadButtonText));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        // Full folders before Partials (the Full is the base the Partials patch on top of), then
+        // position in the tree: compare index paths from the root (sibling order is already natural-sorted).
+        private static int CompareTreeOrder(BuildRepoNode a, BuildRepoNode b)
+        {
+            if (a.IsFullFolder != b.IsFullFolder) return a.IsFullFolder ? -1 : 1;
+
+            static List<int> PathOf(BuildRepoNode n)
+            {
+                var path = new List<int>();
+                for (var c = n; c.Parent != null; c = c.Parent) path.Insert(0, c.Parent.Children.IndexOf(c));
+                return path;
+            }
+
+            var pa = PathOf(a);
+            var pb = PathOf(b);
+            for (int i = 0; i < Math.Min(pa.Count, pb.Count); i++)
+            {
+                if (pa[i] != pb[i]) return pa[i].CompareTo(pb[i]);
+            }
+            return pa.Count.CompareTo(pb.Count);
+        }
 
         public BuildRepoTargetOption? SelectedTarget
         {
@@ -332,11 +461,12 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public string DownloadButtonText => ExtractAfterDownload ? "Download & New Build"
+        public string DownloadButtonText => (ExtractAfterDownload ? "Download & New Build"
             : PatchAfterDownload ? "Download & Patch"
-            : "Download";
+            : "Download") + (IsBatchMode ? $" ({_batch.Count} folders)" : "");
 
-        public bool CanDownload => !IsBusy && SelectedNode?.CanDownload == true && SelectedTarget?.HasBuildPath == true;
+        public bool CanDownload => !IsBusy && SelectedTarget?.HasBuildPath == true
+                                   && (IsBatchMode || SelectedNode?.CanDownload == true);
 
         public bool IsBusy
         {
@@ -359,11 +489,32 @@ namespace CommandCenter.ViewModel
         public string StatusText { get => _statusText; private set => SetProperty(ref _statusText, value); }
         public string LogText { get => _logText; private set => SetProperty(ref _logText, value); }
 
+        /// <summary>
+        /// True while a download dropped mid-file and WebView2 kept the partial bytes - the Resume
+        /// button shows, and Cancel becomes "Discard" (throws the partial away and resets).
+        /// </summary>
+        public bool IsAwaitingResume
+        {
+            get => _isAwaitingResume;
+            private set
+            {
+                if (SetProperty(ref _isAwaitingResume, value))
+                {
+                    OnPropertyChanged(nameof(CancelButtonText));
+                    System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+                }
+            }
+        }
+
+        public string CancelButtonText => IsAwaitingResume ? "Discard" : "Cancel";
+
         public AsyncRelayCommand RefreshCommand { get; }
         public AsyncRelayCommand SignInCommand { get; }
         public AsyncRelayCommand DownloadCommand { get; }
         public RelayCommand CancelCommand { get; }
+        public RelayCommand ResumeCommand { get; }
         public RelayCommand OpenBuildFolderCommand { get; }
+        public RelayCommand ClearBatchCommand { get; }
 
         // ---------- Activation ----------
 
@@ -408,7 +559,7 @@ namespace CommandCenter.ViewModel
         {
             BuildRepoDefaults.TryParseFolderId(RootFolderUrl, out var rootId);
             return new BuildRepoNode(BuildRepoNodeKind.Root, BuildRepoDefaults.RootTitle,
-                string.IsNullOrEmpty(rootId) ? null : rootId, null, LoadChildrenAsync, OnNodeSelected);
+                string.IsNullOrEmpty(rootId) ? null : rootId, null, LoadChildrenAsync, OnNodeSelected, OnBatchToggled);
         }
 
         private void OnNodeSelected(BuildRepoNode node) => SelectedNode = node;
@@ -422,6 +573,7 @@ namespace CommandCenter.ViewModel
             _browseCts = new CancellationTokenSource();
 
             _listingCache.Clear();
+            ClearBatch();
             RootNodes.Clear();
             SelectedNode = null;
             _root = CreateRoot();
@@ -456,7 +608,7 @@ namespace CommandCenter.ViewModel
                             .Where(i => i.IsFolder)
                             .OrderByDescending(i => BuildRepoDefaults.VersionKey(i.Name), Comparer<int[]>.Create(BuildRepoDefaults.CompareVersionKeys))
                             .ThenBy(i => i.Name, NaturalStringComparer.Instance)
-                            .Select(i => new BuildRepoNode(BuildRepoNodeKind.Version, i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected))
+                            .Select(i => new BuildRepoNode(BuildRepoNodeKind.Version, i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
                             .ToList();
                         if (children.Count == 0) children.Add(Message("No version folders found.", node));
                         Log($"Listed {children.Count(c => !c.IsMessage)} version(s).");
@@ -481,7 +633,7 @@ namespace CommandCenter.ViewModel
                         var builds = await ListCachedAsync(buildFolder.Id, ct);
                         children = SortFoldersFirst(builds)
                             .Select(i => new BuildRepoNode(i.IsFolder ? BuildRepoNodeKind.Build : BuildRepoNodeKind.File,
-                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected))
+                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
                             .ToList();
                         if (children.Count == 0) children.Add(Message("The Build folder is empty.", node));
                         break;
@@ -492,7 +644,7 @@ namespace CommandCenter.ViewModel
                         var items = await ListCachedAsync(node.DriveId, ct);
                         children = SortFoldersFirst(items)
                             .Select(i => new BuildRepoNode(i.IsFolder ? BuildRepoNodeKind.Folder : BuildRepoNodeKind.File,
-                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected))
+                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
                             .ToList();
                         if (children.Count == 0) children.Add(Message("(empty)", node));
                         break;
@@ -611,6 +763,12 @@ namespace CommandCenter.ViewModel
 
         private async Task DownloadSelectedAsync()
         {
+            if (IsBatchMode)
+            {
+                await DownloadBatchAsync(_batch.ToList());
+                return;
+            }
+
             var node = SelectedNode;
             var target = SelectedTarget;
             if (node == null || !node.CanDownload || node.DriveId == null || target == null || !target.HasBuildPath) return;
@@ -627,6 +785,7 @@ namespace CommandCenter.ViewModel
             var extract = ExtractAfterDownload || patchOnly;
             var buildPath = target.BuildPath;
             var externalUpdateStarted = false;
+            var downloading = false; // true only while files are coming down (before any extract)
             string? stagingRoot = null;
             var ct = Begin($"Listing files in {node.Name}...", indeterminate: true);
             ClearLog();
@@ -734,6 +893,7 @@ namespace CommandCenter.ViewModel
                 var downloaded = new List<string>();
                 var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 IsProgressIndeterminate = false;
+                downloading = true;
 
                 for (int i = 0; i < files.Count; i++)
                 {
@@ -755,11 +915,12 @@ namespace CommandCenter.ViewModel
                         StatusText = $"Downloading {fileNumber} of {files.Count}: {name} - {sizeText}";
                     });
 
-                    await _session.DownloadLargeFileAsync(item.Id, destination, progress, ct);
+                    await DownloadFileWithResumeAsync(item.Id, destination, fileNumber, files.Count, progress, ct);
                     downloaded.Add(destination);
                     Log($"  ✓ {relative}  ({FormatBytes(new FileInfo(destination).Length)})");
                 }
 
+                downloading = false;
                 ProgressPercent = downloadBand;
                 NeedsSignIn = false;
 
@@ -867,24 +1028,45 @@ namespace CommandCenter.ViewModel
             }
             catch (SignInRequiredException)
             {
+                if (downloading) ResetAfterFailedDownload(stagingRoot);
                 NeedsSignIn = true;
                 StatusText = "Google sign-in required - sign in, then try the download again.";
                 Log("Stopped: Google sign-in required.");
             }
             catch (OperationCanceledException)
             {
-                StatusText = "Download cancelled.";
+                if (downloading)
+                {
+                    ResetAfterFailedDownload(stagingRoot);
+                    StatusText = $"Download cancelled - partial files removed. Click {DownloadButtonText} to start over.";
+                }
+                else
+                {
+                    StatusText = "Download cancelled.";
+                }
                 Log("Cancelled.");
             }
             catch (Exception ex)
             {
-                StatusText = $"Failed: {ex.Message}";
                 Log($"Failed: {ex.Message}");
-                if (stagingRoot != null && Directory.Exists(stagingRoot))
+                if (downloading)
                 {
-                    Log($"Downloaded files are still in: {stagingRoot}");
+                    // Couldn't resume (or something else broke mid-download): nothing half-written is
+                    // kept, so the next click starts clean.
+                    ResetAfterFailedDownload(stagingRoot);
+                    StatusText = $"Failed: {ex.Message} Partial download removed - click {DownloadButtonText} to start over.";
+                    MessageBox.Show($"{ex.Message}\n\nThis download couldn't be resumed, so the partial files were removed. Click {DownloadButtonText} to start over.",
+                        "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
-                MessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                else
+                {
+                    StatusText = $"Failed: {ex.Message}";
+                    if (stagingRoot != null && Directory.Exists(stagingRoot))
+                    {
+                        Log($"Downloaded files are still in: {stagingRoot}");
+                    }
+                    MessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
             finally
             {
@@ -894,6 +1076,430 @@ namespace CommandCenter.ViewModel
                 }
                 End();
             }
+        }
+
+        // Batch: several Full/Partial folders of ONE build (ticked in the tree), Full first. Everything is downloaded
+        // first - each Partial into its own numbered staging subfolder so their contents never mix -
+        // then each one is applied as its own Patch, in tree order ("Partial" → "Partial 1 10/28" →
+        // "Partial 2 10/28"), so a later Partial overwrites an earlier one exactly as if they'd been
+        // run one after another by hand. Download-only mode writes them straight into the build
+        // folder in the same order.
+        private async Task DownloadBatchAsync(List<BuildRepoNode> nodes)
+        {
+            var target = SelectedTarget;
+            if (nodes.Count == 0 || target == null || !target.HasBuildPath) return;
+
+            var build = nodes[0].BuildAncestor;
+            if (build == null || nodes.Any(n => n.DriveId == null || !ReferenceEquals(n.BuildAncestor, build)))
+            {
+                MessageBox.Show("Batched folders all have to come from the same build.", "Build Repo",
+                    MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var buildVm = _findBuildSection(target.Id);
+            if (buildVm?.IsBusy == true)
+            {
+                MessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
+                    "Build Repo", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var patchOnly = PatchAfterDownload;
+            var extract = ExtractAfterDownload || patchOnly;
+            var buildPath = target.BuildPath;
+            var batchLabel = $"{build.Name} ({string.Join(", ", nodes.Select(n => n.Name))})";
+            var externalUpdateStarted = false;
+            var downloading = false;
+            string? stagingRoot = null;
+            var ct = Begin($"Listing files in {nodes.Count} folders...", indeterminate: true);
+            ClearLog();
+            Log($"Batch from: {build.Breadcrumb}");
+            for (int i = 0; i < nodes.Count; i++) Log($"  {i + 1}. {nodes[i].Name}");
+            Log($"Target tab: {target.Title}  ({buildPath})");
+
+            try
+            {
+                // 1. List every Partial's files.
+                var groups = new List<(BuildRepoNode Node, List<(DriveItem Item, string RelativePath)> Files)>();
+                foreach (var node in nodes)
+                {
+                    var files = new List<(DriveItem Item, string RelativePath)>();
+                    await CollectFilesAsync(node.DriveId!, string.Empty, files, ct, depth: 0);
+                    if (files.Count == 0)
+                    {
+                        Log($"{node.Name}: empty - skipped.");
+                        continue;
+                    }
+                    Log($"{node.Name}: {files.Count} file(s).");
+                    groups.Add((node, files));
+                }
+
+                var totalFiles = groups.Sum(g => g.Files.Count);
+                if (totalFiles == 0)
+                {
+                    StatusText = "None of the selected folders have any files to download.";
+                    return;
+                }
+
+                // 2. Nothing to extract? Offer a plain download instead (same as a single selection).
+                var allRelative = groups.SelectMany(g => g.Files.Select(f => f.RelativePath)).ToList();
+                if (extract && !allRelative.Any(BuildRepoDefaults.IsArchive))
+                {
+                    var answer = MessageBox.Show(
+                        $"None of the {totalFiles} file(s) in the selected folders are .zip/.7z archives, so there's nothing to extract.\n\nDownload them into {target.Title}'s build folder instead?",
+                        "Build Repo", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (answer != MessageBoxResult.Yes)
+                    {
+                        StatusText = "Download cancelled.";
+                        return;
+                    }
+                    extract = false;
+                    patchOnly = false;
+                }
+
+                var hasFull = extract && !patchOnly && groups.Any(g =>
+                    g.Files.Any(f => BuildRepoDefaults.IsFullArchive(f.RelativePath))
+                    || (g.Node.IsFullFolder && g.Files.Count(f => BuildRepoDefaults.IsArchive(f.RelativePath)) == 1));
+
+                // 3. Confirm, showing the order they'll be applied in.
+                var orderText = string.Join("\n", groups.Select((g, i) => $"  {i + 1}. {g.Node.Name}  ({g.Files.Count} file(s))"));
+                string confirmText;
+                if (!extract)
+                {
+                    confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name} into {target.Title}'s Current Build directory, in this order:\n{orderText}\n\n{buildPath}\n\n" +
+                                  "Later folders overwrite files with the same names from earlier ones.\n\nContinue?";
+                }
+                else if (hasFull)
+                {
+                    confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name}, then REPLACE the existing {target.Title} build at:\n{buildPath}\n\n" +
+                                  "The Full archive is applied like New Build (the current build is wiped), then everything else is applied like Patch in this order:\n" +
+                                  $"{orderText}\n\nContinue?";
+                }
+                else
+                {
+                    confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name} and PATCH the existing {target.Title} build at:\n{buildPath}\n\n" +
+                                  $"Each folder is applied like the Patch button (Full included - overlaid, not wiped), one after another, in this order:\n{orderText}\n\n" +
+                                  "The current build is kept - later folders overwrite files with the same names.\n\nContinue?";
+                }
+
+                var versionLabel = VersionLabelFor(groups[0].Node);
+                if (extract && versionLabel != null)
+                {
+                    confirmText = confirmText.Replace("\n\nContinue?",
+                        $"\n\n{target.Title}'s Version Number will be set to {versionLabel} once it finishes.\n\nContinue?");
+                }
+
+                if (MessageBox.Show(confirmText, hasFull ? "Confirm Batch Download & New Build" : extract ? "Confirm Batch Download & Patch" : "Confirm Batch Download",
+                        MessageBoxButton.YesNo, hasFull ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
+                {
+                    StatusText = "Download cancelled.";
+                    return;
+                }
+
+                // 4. Download everything - each Partial into its own folder ("01 Partial", "02 Partial 1 10_28", ...).
+                if (extract)
+                {
+                    stagingRoot = StagingFolderFor(target, $"{build.Name} batch");
+                    if (Directory.Exists(stagingRoot)) TryDeleteDirectory(stagingRoot); // stale leftovers
+                }
+
+                var downloadBand = extract ? 60.0 : 100.0;
+                var groupRoots = new List<string>();
+                var groupDownloads = new List<List<string>>();
+                IsProgressIndeterminate = false;
+                downloading = true;
+                int fileIndex = 0;
+
+                for (int g = 0; g < groups.Count; g++)
+                {
+                    var (node, files) = groups[g];
+                    var groupRoot = extract
+                        ? Path.Combine(stagingRoot!, $"{g + 1:00} {BuildRepoDefaults.MakeSafeFileName(node.Name)}")
+                        : buildPath;
+                    Directory.CreateDirectory(groupRoot);
+                    groupRoots.Add(groupRoot);
+                    Log($"Downloading {node.Name} to: {groupRoot}");
+
+                    var downloaded = new List<string>();
+                    var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var (item, relative) in files)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var destination = UniquePath(Path.Combine(groupRoot, relative), usedPaths);
+                        int index = fileIndex++;
+                        int fileNumber = index + 1;
+                        var name = Path.GetFileName(destination);
+                        var partName = node.Name;
+
+                        StatusText = $"Downloading {fileNumber} of {totalFiles} ({partName}): {name}...";
+                        var progress = new Progress<DriveDownloadProgress>(p =>
+                        {
+                            double fraction = p.TotalBytes is > 0 ? (double)p.BytesReceived / p.TotalBytes.Value : 0;
+                            ProgressPercent = (index + fraction) / totalFiles * downloadBand;
+                            var sizeText = p.TotalBytes is > 0
+                                ? $"{FormatBytes(p.BytesReceived)} of {FormatBytes(p.TotalBytes.Value)} ({fraction:P0})"
+                                : FormatBytes(p.BytesReceived);
+                            StatusText = $"Downloading {fileNumber} of {totalFiles} ({partName}): {name} - {sizeText}";
+                        });
+
+                        await DownloadFileWithResumeAsync(item.Id, destination, fileNumber, totalFiles, progress, ct);
+                        downloaded.Add(destination);
+                        Log($"  ✓ {node.Name}{Path.DirectorySeparatorChar}{relative}  ({FormatBytes(new FileInfo(destination).Length)})");
+                    }
+                    groupDownloads.Add(downloaded);
+                }
+
+                downloading = false;
+                ProgressPercent = downloadBand;
+                NeedsSignIn = false;
+
+                if (!extract)
+                {
+                    StatusText = $"Downloaded {groups.Count} folders ({totalFiles} file(s)) from {build.Name} into {target.Title}'s build folder.";
+                    Log("Done.");
+                    return;
+                }
+
+                // 5. Apply. Optional New Build first (first Full_* across the batch), then one Patch per Partial, in order.
+                Log(patchOnly ? "Mode: Patch, one Partial at a time (existing build is kept)." : "Mode: New Build + Patches.");
+                buildVm?.BeginExternalUpdate($"Build Repo: {(patchOnly ? "patching" : "extracting")} {batchLabel}...");
+                externalUpdateStarted = true;
+
+                var steps = new List<(string Label, Func<IProgress<UpdateProgress>, Task> Run)>();
+                var newBuildQueued = false;
+
+                for (int g = 0; g < groups.Count; g++)
+                {
+                    var groupRoot = groupRoots[g];
+                    var partName = groups[g].Node.Name;
+                    var fulls = groupDownloads[g].Where(BuildRepoDefaults.IsFullArchive)
+                        .OrderBy(f => Path.GetRelativePath(groupRoot, f), NaturalStringComparer.Instance)
+                        .ToList();
+
+                    // A ticked Full folder whose archive isn't named Full_* (e.g. "Client.zip") - if it
+                    // holds exactly one archive, that's the full client.
+                    if (fulls.Count == 0 && groups[g].Node.IsFullFolder)
+                    {
+                        var archives = groupDownloads[g].Where(BuildRepoDefaults.IsArchive).ToList();
+                        if (archives.Count == 1) fulls.Add(archives[0]);
+                    }
+
+                    foreach (var full in fulls)
+                    {
+                        var mode = !patchOnly && !newBuildQueued ? UpdateMode.NewBuild : UpdateMode.Patch;
+                        var step = ($"{(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {partName} / {Path.GetFileName(full)}",
+                            (Func<IProgress<UpdateProgress>, Task>)(async p =>
+                            {
+                                await BuildUpdateService.RunAsync(full, buildPath, mode, p, ct);
+                                RemoveAppliedArchive(full, groupRoot);
+                            }));
+
+                        if (mode == UpdateMode.NewBuild)
+                        {
+                            steps.Insert(0, step); // the wipe has to come before ANY patch
+                            newBuildQueued = true;
+                        }
+                        else
+                        {
+                            steps.Add(step);
+                        }
+                    }
+
+                    steps.Add(($"Patch: {partName}", async p =>
+                    {
+                        if (BuildUpdateService.HasPatchContent(groupRoot))
+                        {
+                            await BuildUpdateService.RunPatchFromFolderAsync(groupRoot, buildPath, p, ct);
+                        }
+                        else
+                        {
+                            Log($"  {partName}: nothing to patch (only checksum files) - skipped.");
+                        }
+                    }));
+                }
+
+                for (int i = 0; i < steps.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (label, run) = steps[i];
+                    int index = i;
+                    int stepNumber = i + 1;
+                    Log($"Step {stepNumber} of {steps.Count} - {label}");
+
+                    var progress = new Progress<UpdateProgress>(p =>
+                    {
+                        var pct = downloadBand + (index + p.PercentComplete / 100.0) / steps.Count * (100.0 - downloadBand);
+                        var text = $"Step {stepNumber} of {steps.Count} ({label}): {p.Status}";
+                        ProgressPercent = pct;
+                        StatusText = text;
+                        buildVm?.ReportExternalProgress(pct, text);
+                    });
+
+                    await run(progress);
+                }
+
+                // 6. Same wrap-up as a single download.
+                RescanExecutables(target.Settings);
+                if (versionLabel != null)
+                {
+                    target.Settings.VersionNumber = versionLabel;
+                    Log($"Set {target.Title}'s Version Number to {versionLabel}.");
+                }
+                TrySaveSettings();
+
+                TryDeleteDirectory(stagingRoot!);
+                CleanupEmptyStagingParents(stagingRoot!);
+
+                ProgressPercent = 100;
+                var doneText = $"{groups.Count} folders from {build.Name} {(patchOnly ? "patched into" : "extracted into")} {target.Title}. Ready to launch.";
+                StatusText = doneText;
+                Log("Done. Downloaded files removed from the staging folder.");
+                buildVm?.EndExternalUpdate(doneText, succeeded: true);
+                externalUpdateStarted = false;
+                ClearBatch();
+            }
+            catch (SignInRequiredException)
+            {
+                if (downloading) ResetAfterFailedDownload(stagingRoot);
+                NeedsSignIn = true;
+                StatusText = "Google sign-in required - sign in, then try the download again.";
+                Log("Stopped: Google sign-in required.");
+            }
+            catch (OperationCanceledException)
+            {
+                if (downloading)
+                {
+                    ResetAfterFailedDownload(stagingRoot);
+                    StatusText = $"Download cancelled - partial files removed. Click {DownloadButtonText} to start over.";
+                }
+                else
+                {
+                    StatusText = "Download cancelled.";
+                }
+                Log("Cancelled.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed: {ex.Message}");
+                if (downloading)
+                {
+                    ResetAfterFailedDownload(stagingRoot);
+                    StatusText = $"Failed: {ex.Message} Partial download removed - click {DownloadButtonText} to start over.";
+                    MessageBox.Show($"{ex.Message}\n\nThis download couldn't be resumed, so the partial files were removed. Click {DownloadButtonText} to start over.",
+                        "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                else
+                {
+                    StatusText = $"Failed: {ex.Message}";
+                    if (stagingRoot != null && Directory.Exists(stagingRoot))
+                    {
+                        Log($"Downloaded files are still in: {stagingRoot}");
+                    }
+                    MessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+            finally
+            {
+                if (externalUpdateStarted)
+                {
+                    buildVm?.EndExternalUpdate(StatusText, succeeded: false);
+                }
+                End();
+            }
+        }
+
+        // Downloads one file. If the connection drops and WebView2 kept the partial bytes, pauses
+        // and waits for the user: Resume picks up from the bytes already on disk (as many times as
+        // needed), Discard/Cancel throws them away. A drop that can't be resumed just throws - the
+        // caller's catch wipes the partials and resets the UI.
+        private async Task DownloadFileWithResumeAsync(string fileId, string destination, int fileNumber, int fileCount,
+            IProgress<DriveDownloadProgress> progress, CancellationToken ct)
+        {
+            var name = Path.GetFileName(destination);
+            ResumableDriveDownload? pending = null;
+            string reason;
+
+            try
+            {
+                try
+                {
+                    await _session.DownloadLargeFileAsync(fileId, destination, progress, ct);
+                    return;
+                }
+                catch (DriveDownloadInterruptedException ex) when (ex.Resumable != null)
+                {
+                    pending = ex.Resumable;
+                    reason = ex.Reason;
+                }
+
+                while (true)
+                {
+                    var got = pending.TotalBytes is > 0
+                        ? $"{FormatBytes(pending.BytesReceived)} of {FormatBytes(pending.TotalBytes.Value)}"
+                        : FormatBytes(pending.BytesReceived);
+                    Log($"  ! {name}: interrupted ({reason}) at {got} - partial kept, waiting for Resume or Discard.");
+                    StatusText = $"Paused - {name} interrupted ({reason}) at {got}. Resume to continue from there, or Discard to start over.";
+
+                    await WaitForResumeDecisionAsync(ct); // Discard/Cancel => OperationCanceledException
+
+                    Log($"  Resuming {name} from {FormatBytes(pending.BytesReceived)}...");
+                    StatusText = $"Resuming {fileNumber} of {fileCount}: {name}...";
+                    try
+                    {
+                        await pending.ResumeAsync(progress, ct);
+                        pending = null; // completed and moved into place
+                        Log($"  Resumed {name} successfully.");
+                        return;
+                    }
+                    catch (DriveDownloadInterruptedException ex) when (ex.Resumable != null)
+                    {
+                        pending = ex.Resumable; // dropped again - ask again
+                        reason = ex.Reason;
+                    }
+                }
+            }
+            finally
+            {
+                if (pending != null) await pending.DiscardAsync(); // no-op if it already closed itself
+            }
+        }
+
+        private async Task WaitForResumeDecisionAsync(CancellationToken ct)
+        {
+            var decision = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _resumeDecision = decision;
+            IsAwaitingResume = true;
+            try
+            {
+                using (ct.Register(() => decision.TrySetCanceled(ct)))
+                {
+                    await decision.Task;
+                }
+            }
+            finally
+            {
+                _resumeDecision = null;
+                IsAwaitingResume = false;
+            }
+        }
+
+        // A download that failed/was discarded mid-way: delete the staging folder (extract modes -
+        // it only ever holds this run's downloads; Download-only mode writes straight into the build
+        // folder, where completed files are fine and the partial is already gone) and zero the bar.
+        private void ResetAfterFailedDownload(string? stagingRoot)
+        {
+            if (stagingRoot != null && Directory.Exists(stagingRoot))
+            {
+                TryDeleteDirectory(stagingRoot);
+                CleanupEmptyStagingParents(stagingRoot);
+                Log($"Removed partial download folder: {stagingRoot}");
+            }
+            else
+            {
+                Log("Partial download removed.");
+            }
+            ProgressPercent = 0;
         }
 
         // Recursively lists a Drive folder into (file, relative path) pairs, mirroring its structure.

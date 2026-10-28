@@ -124,7 +124,7 @@
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Build Repo" FontSize="16" FontWeight="Bold"/>
                 <TextBlock Opacity="0.75" TextWrapping="Wrap"
-                           Text="Click (+) on a version to see its builds, and (+) on a build to see what's inside. Select a build, folder or file to download it."/>
+                           Text="Click (+) on a version to see its builds, and (+) on a build to see what's inside. Select a build, folder or file to download it - or tick several Full/Partial folders in one build to batch them (Full is applied first)."/>
             </StackPanel>
         </DockPanel>
 
@@ -136,6 +136,12 @@
                 <TreeView.ItemTemplate>
                     <HierarchicalDataTemplate DataType="{x:Type vm:BuildRepoNode}" ItemsSource="{Binding Children}">
                         <StackPanel Orientation="Horizontal">
+                            <!-- Full/Partial folders only: tick several from the same build to download + apply them together, in order -->
+                            <CheckBox IsChecked="{Binding IsBatchChecked, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,6,0"
+                                      Focusable="False"
+                                      ToolTip="Add to batch - tick several Full/Partial folders from the same build to download and apply them in order (Full first)"
+                                      IsEnabled="{Binding DataContext.IsNotBusy, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                                      Visibility="{Binding IsBatchEligible, Converter={StaticResource BoolToVis}}"/>
                             <TextBlock x:Name="Glyph" Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"
                                        VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#FF3D85C6"/>
                             <TextBlock x:Name="NameText" Text="{Binding Name}" VerticalAlignment="Center"/>
@@ -185,7 +191,11 @@
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Selected:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"/>
-                <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectionText}" TextWrapping="Wrap" Margin="0,0,0,6" VerticalAlignment="Center"/>
+                <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right" Content="Clear Batch" Command="{Binding ClearBatchCommand}" Padding="10,3" Margin="8,0,0,0"
+                            VerticalAlignment="Center" Visibility="{Binding IsBatchMode, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding SelectionText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                </DockPanel>
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Download for tab:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"/>
                 <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,6">
@@ -229,8 +239,11 @@
                 <DockPanel Grid.Row="4" Grid.ColumnSpan="2">
                     <Button DockPanel.Dock="Left" Content="{Binding DownloadButtonText}" Command="{Binding DownloadCommand}"
                             Padding="14,5" MinWidth="150" FontWeight="SemiBold"/>
-                    <Button DockPanel.Dock="Right" Content="Cancel" Command="{Binding CancelCommand}" Padding="12,5" Margin="8,0,0,0"
+                    <Button DockPanel.Dock="Right" Content="{Binding CancelButtonText}" Command="{Binding CancelCommand}" Padding="12,5" Margin="8,0,0,0"
                             Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
+                    <Button DockPanel.Dock="Right" Content="Resume" Command="{Binding ResumeCommand}" Padding="12,5" Margin="8,0,0,0"
+                            FontWeight="SemiBold" ToolTip="Continue the interrupted download from where it stopped"
+                            Visibility="{Binding IsAwaitingResume, Converter={StaticResource BoolToVis}}"/>
                     <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
                         <ProgressBar Height="14" Value="{Binding ProgressPercent, Mode=OneWay}" Maximum="100"
                                      IsIndeterminate="{Binding IsProgressIndeterminate, Mode=OneWay}"

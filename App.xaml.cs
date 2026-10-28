@@ -81,7 +81,8 @@ namespace CommandCenter
             }
         }
 
-        private static bool IsRunningElevated()
+        // internal so Helpers/ElevatedFileDropBridge can reuse the same check.
+        internal static bool IsRunningElevated()
         {
             using var identity = WindowsIdentity.GetCurrent();
             var principal = new WindowsPrincipal(identity);

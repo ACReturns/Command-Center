@@ -35,6 +35,199 @@ namespace CommandCenter.Services
     public readonly record struct DriveDownloadProgress(long BytesReceived, long? TotalBytes);
 
     /// <summary>
+    /// Thrown by DownloadLargeFileAsync / ResumableDriveDownload.ResumeAsync when a transfer drops
+    /// mid-file (NetworkFailed, NetworkTimeout, Wi-Fi/VPN hiccup...). When <see cref="Resumable"/> is
+    /// non-null the partial bytes are still on disk and the hidden browser that owns them is still
+    /// open - call ResumeAsync on it to continue from where it stopped, or DiscardAsync to throw the
+    /// partial away. Null means it can't be resumed and the partial file has already been deleted.
+    /// </summary>
+    public sealed class DriveDownloadInterruptedException : IOException
+    {
+        public DriveDownloadInterruptedException(string reason, ResumableDriveDownload? resumable)
+            : base($"Download interrupted - {GoogleWebSession.DescribeInterruptReason(reason)}")
+        {
+            Reason = reason;
+            Resumable = resumable;
+        }
+
+        public string Reason { get; }
+        public ResumableDriveDownload? Resumable { get; }
+    }
+
+    /// <summary>
+    /// One in-flight (or paused-after-interruption) Drive file download. Owns its short-lived hidden
+    /// WebView2 controller, because WebView2 can only resume a download through the same
+    /// CoreWebView2DownloadOperation that started it - closing the controller kills the resume.
+    /// Must be used on the UI thread like everything else WebView2.
+    /// </summary>
+    public sealed class ResumableDriveDownload : IDisposable
+    {
+        private readonly CoreWebView2Controller _controller;
+        private readonly CoreWebView2DownloadOperation _operation;
+        private readonly string _partPath;
+        private readonly string _destinationPath;
+        private IProgress<DriveDownloadProgress>? _progress;
+        private TaskCompletionSource<bool> _done = NewDone();
+        private bool _closed;
+
+        internal ResumableDriveDownload(CoreWebView2Controller controller, CoreWebView2DownloadOperation operation,
+            string partPath, string destinationPath, IProgress<DriveDownloadProgress>? progress)
+        {
+            _controller = controller;
+            _operation = operation;
+            _partPath = partPath;
+            _destinationPath = destinationPath;
+            _progress = progress;
+            _operation.BytesReceivedChanged += OnBytesReceivedChanged;
+            _operation.StateChanged += OnStateChanged;
+        }
+
+        public string FileName => Path.GetFileName(_destinationPath);
+        public long BytesReceived => _closed ? 0 : _operation.BytesReceived;
+
+        public long? TotalBytes
+        {
+            get
+            {
+                if (_closed) return null;
+                var total = (long?)_operation.TotalBytesToReceive;
+                return total is > 0 ? total : null;
+            }
+        }
+
+        private static TaskCompletionSource<bool> NewDone() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        private void OnBytesReceivedChanged(object? sender, object e) =>
+            _progress?.Report(new DriveDownloadProgress(_operation.BytesReceived, TotalBytes));
+
+        private void OnStateChanged(object? sender, object e)
+        {
+            if (_operation.State == CoreWebView2DownloadState.Completed) _done.TrySetResult(true);
+            else if (_operation.State == CoreWebView2DownloadState.Interrupted) _done.TrySetResult(false);
+        }
+
+        /// <summary>Waits for the current attempt to finish; moves .part into place on success.</summary>
+        internal async Task RunAsync(CancellationToken ct)
+        {
+            var done = _done;
+            bool completed;
+            using (ct.Register(() => done.TrySetCanceled(ct)))
+            {
+                completed = await done.Task; // OperationCanceledException on cancel - caller discards
+            }
+
+            if (completed)
+            {
+                Close(deletePartial: false);
+                File.Move(_partPath, _destinationPath, overwrite: true);
+                return;
+            }
+
+            var reason = _operation.InterruptReason.ToString();
+            if (_operation.CanResume)
+            {
+                throw new DriveDownloadInterruptedException(reason, this);
+            }
+
+            await DiscardAsync();
+            throw new DriveDownloadInterruptedException(reason, null);
+        }
+
+        /// <summary>
+        /// Continues an interrupted download from the bytes already on disk (an HTTP Range request
+        /// under the hood). Throws DriveDownloadInterruptedException again if it drops again.
+        /// </summary>
+        public Task ResumeAsync(IProgress<DriveDownloadProgress>? progress, CancellationToken ct)
+        {
+            if (_closed) throw new ObjectDisposedException(nameof(ResumableDriveDownload));
+            if (progress != null) _progress = progress;
+            _done = NewDone();
+
+            try
+            {
+                _operation.Resume();
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or InvalidOperationException)
+            {
+                var reason = _operation.InterruptReason.ToString();
+                _ = DiscardAsync();
+                throw new DriveDownloadInterruptedException(reason, null);
+            }
+
+            return RunAsync(ct);
+        }
+
+        /// <summary>Cancels the download, closes its browser and deletes every partial file it left.</summary>
+        public async Task DiscardAsync()
+        {
+            if (_closed) return;
+            Close(deletePartial: true);
+
+            // Chromium releases the intermediate file a beat after Cancel/Close - retry briefly.
+            for (int i = 0; i < 10 && DeletePartials(); i++)
+            {
+                await Task.Delay(200);
+            }
+        }
+
+        public void Dispose()
+        {
+            if (_closed) return;
+            Close(deletePartial: true);
+            DeletePartials();
+        }
+
+        private void Close(bool deletePartial)
+        {
+            if (_closed) return;
+            _closed = true;
+            try
+            {
+                _operation.BytesReceivedChanged -= OnBytesReceivedChanged;
+                _operation.StateChanged -= OnStateChanged;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+
+            if (deletePartial)
+            {
+                try
+                {
+                    if (_operation.State != CoreWebView2DownloadState.Completed) _operation.Cancel();
+                }
+                catch { /* already gone */ }
+            }
+
+            try { _controller.Close(); } catch { }
+        }
+
+        // Returns true while something is still left to delete (locked), false once it's clean.
+        private bool DeletePartials()
+        {
+            var leftovers = false;
+            var candidates = new List<string> { _partPath, _partPath + ".crdownload" };
+
+            var dir = Path.GetDirectoryName(_partPath);
+            if (dir != null && Directory.Exists(dir))
+            {
+                try { candidates.AddRange(Directory.EnumerateFiles(dir, "Unconfirmed *.crdownload")); } catch { }
+            }
+
+            foreach (var path in candidates)
+            {
+                try
+                {
+                    if (File.Exists(path)) File.Delete(path);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    leftovers = true;
+                }
+            }
+            return leftovers;
+        }
+    }
+
+    /// <summary>
     /// Talks to Google through an embedded Edge (WebView2) profile stored under
     /// %LocalAppData%\CommandCenter\WebView2. The user signs in once via GoogleSignInWindow
     /// (normal work SSO); the cookies persist in that profile, and everything after that runs
@@ -521,37 +714,35 @@ namespace CommandCenter.Services
         /// Google takes to START sending the file - and runs in its own short-lived hidden WebView2
         /// (same profile/cookies), so it doesn't hold the shared gate for the whole transfer and the
         /// Build Repo tree / Maintenance tab stay usable while it runs. Writes to a .part file first.
+        ///
+        /// If the transfer drops mid-file and WebView2 says it can be resumed, this throws
+        /// DriveDownloadInterruptedException with a live <see cref="ResumableDriveDownload"/> - the
+        /// caller then owns it and must ResumeAsync or DiscardAsync it. Otherwise the partial is deleted.
         /// </summary>
         public async Task DownloadLargeFileAsync(string fileId, string destinationPath, IProgress<DriveDownloadProgress>? progress, CancellationToken ct)
         {
             CoreWebView2Controller? controller = null;
             CoreWebView2? web = null;
-            CoreWebView2DownloadOperation? operation = null;
+            ResumableDriveDownload? job = null;
+            var handedOff = false;
             var partPath = destinationPath + ".part";
             var downloadStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var done = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously); // pre-start failures only
             var triedInterstitial = false;
             var triedFallbackUrl = false;
 
             void OnDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
             {
+                if (job != null || controller == null)
+                {
+                    e.Cancel = true; // one file per job
+                    return;
+                }
+
                 e.ResultFilePath = partPath;
                 e.Handled = true;
-                operation = e.DownloadOperation;
+                job = new ResumableDriveDownload(controller, e.DownloadOperation, partPath, destinationPath, progress);
                 downloadStarted.TrySetResult(true);
-
-                operation.BytesReceivedChanged += (_, _) =>
-                {
-                    var total = (long?)operation.TotalBytesToReceive;
-                    progress?.Report(new DriveDownloadProgress(operation.BytesReceived, total is > 0 ? total : null));
-                };
-                operation.StateChanged += (_, _) =>
-                {
-                    if (operation.State == CoreWebView2DownloadState.Completed)
-                        done.TrySetResult(true);
-                    else if (operation.State == CoreWebView2DownloadState.Interrupted)
-                        done.TrySetException(new IOException($"Download interrupted ({operation.InterruptReason})."));
-                };
             }
 
             async void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -603,12 +794,6 @@ namespace CommandCenter.Services
                 }
             }
 
-            using var cancelReg = ct.Register(() =>
-            {
-                try { operation?.Cancel(); } catch { }
-                done.TrySetCanceled(ct);
-            });
-
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
@@ -628,30 +813,48 @@ namespace CommandCenter.Services
 
                 // Only the START is time-limited; once bytes are flowing, wait as long as it takes.
                 var first = await Task.WhenAny(downloadStarted.Task, done.Task, Task.Delay(OperationTimeout, ct));
-                if (first != downloadStarted.Task && first != done.Task)
+                if (first == done.Task)
+                {
+                    await done.Task; // rethrows SignInRequired / IOException
+                }
+                if (first != downloadStarted.Task)
                 {
                     ct.ThrowIfCancellationRequested();
                     throw new TimeoutException("Google didn't start the download within 60 seconds.");
                 }
 
-                await done.Task; // rethrows SignInRequired / IOException / cancellation
-                File.Move(partPath, destinationPath, overwrite: true);
+                // Bytes are flowing - stop reacting to page navigations and wait as long as it takes.
+                web.NavigationCompleted -= OnNavigationCompleted;
+
+                try
+                {
+                    await job!.RunAsync(ct); // moves .part into place on success
+                }
+                catch (DriveDownloadInterruptedException ex) when (ex.Resumable != null)
+                {
+                    handedOff = true; // caller now owns the paused download (resume or discard)
+                    throw;
+                }
             }
             finally
             {
+                // A completed (or discarded) job has already closed its controller, and touching
+                // CoreWebView2 after that throws "CoreWebView2 members cannot be accessed after the
+                // WebView2 control is disposed" - which used to turn every SUCCESSFUL download into
+                // a failure. The handlers die with the closed controller anyway, so a throw here is
+                // safe to ignore.
                 if (web != null)
                 {
-                    web.DownloadStarting -= OnDownloadStarting;
-                    web.NavigationCompleted -= OnNavigationCompleted;
+                    try { web.DownloadStarting -= OnDownloadStarting; } catch (InvalidOperationException) { }
+                    try { web.NavigationCompleted -= OnNavigationCompleted; } catch (InvalidOperationException) { }
                 }
 
-                if (operation != null && operation.State == CoreWebView2DownloadState.InProgress)
+                if (!handedOff)
                 {
-                    try { operation.Cancel(); } catch { }
+                    if (job != null) job.Dispose(); // no-op if it completed
+                    else controller?.Close();
+                    try { if (File.Exists(partPath)) File.Delete(partPath); } catch { }
                 }
-
-                controller?.Close();
-                try { if (File.Exists(partPath)) File.Delete(partPath); } catch { }
             }
         }
 
@@ -700,6 +903,19 @@ namespace CommandCenter.Services
                 _gate.Release();
             }
         }
+
+        /// <summary>Plain-English reason for a WebView2 interrupt code, for the Build Repo log/dialog.</summary>
+        public static string DescribeInterruptReason(string reason) => reason switch
+        {
+            nameof(CoreWebView2DownloadInterruptReason.FileMalicious) =>
+                "Windows security (SmartScreen or Defender) flagged the file as malicious (FileMalicious). " +
+                "Check Windows Security > Virus & threat protection > Protection history to see what flagged it.",
+            nameof(CoreWebView2DownloadInterruptReason.FileBlockedByPolicy) =>
+                "a Windows/Edge policy blocked the file (FileBlockedByPolicy).",
+            nameof(CoreWebView2DownloadInterruptReason.FileSecurityCheckFailed) =>
+                "the Windows security scan of the file failed (FileSecurityCheckFailed).",
+            _ => reason
+        };
 
         private async Task<CoreWebView2> GetHiddenWebViewAsync()
         {
