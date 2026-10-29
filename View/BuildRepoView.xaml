@@ -145,6 +145,12 @@
                             <TextBlock x:Name="Glyph" Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"
                                        VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#FF3D85C6"/>
                             <TextBlock x:Name="NameText" Text="{Binding Name}" VerticalAlignment="Center"/>
+                            <!-- Full = New Build (red), Partial = Patch (blue). When the "Patch" option is on, Full is
+                                 overlaid instead of replacing the build, so its tag flips to Patch to match. -->
+                            <Border x:Name="ModeTag" CornerRadius="3" Padding="5,0" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    Background="#FF3D85C6" Visibility="{Binding HasModeTag, Converter={StaticResource BoolToVis}}">
+                                <TextBlock x:Name="ModeTagText" Text="Patch" Foreground="White" FontSize="11"/>
+                            </Border>
                             <TextBlock Text="{Binding SizeText}" Margin="10,0,0,0" Foreground="#FF666666" FontSize="11" VerticalAlignment="Center"/>
                             <TextBlock Text="  loading..." Opacity="0.6" FontStyle="Italic" VerticalAlignment="Center"
                                        Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"/>
@@ -168,6 +174,14 @@
                                 <Setter TargetName="NameText" Property="FontStyle" Value="Italic"/>
                                 <Setter TargetName="NameText" Property="Opacity" Value="0.7"/>
                             </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsFullItem}" Value="True"/>
+                                    <Condition Binding="{Binding DataContext.PatchAfterDownload, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False"/>
+                                </MultiDataTrigger.Conditions>
+                                <Setter TargetName="ModeTag" Property="Background" Value="#FFB3261E"/>
+                                <Setter TargetName="ModeTagText" Property="Text" Value="New Build"/>
+                            </MultiDataTrigger>
                         </HierarchicalDataTemplate.Triggers>
                     </HierarchicalDataTemplate>
                 </TreeView.ItemTemplate>
@@ -197,16 +211,22 @@
                     <TextBlock Text="{Binding SelectionText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                 </DockPanel>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Download for tab:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"/>
-                <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,6">
+                <!-- Rows 1-2 (target tab + its directory) are hidden in Transfer Build mode, which has its
+                     own Source/Target pickers below. -->
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Download for tab:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"
+                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}"/>
+                <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,6"
+                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}">
                     <Button DockPanel.Dock="Right" Content="Open Build Folder" Command="{Binding OpenBuildFolderCommand}" Padding="10,3" Margin="8,0,0,0"/>
                     <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget, Mode=TwoWay}"
                               DisplayMemberPath="Title" MinWidth="220" HorizontalAlignment="Left"
                               IsEnabled="{Binding IsNotBusy}"/>
                 </DockPanel>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Current Build directory:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"/>
-                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding TargetBuildPathText}" TextWrapping="Wrap" Margin="0,0,0,6" VerticalAlignment="Center">
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Current Build directory:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"
+                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding TargetBuildPathText}" TextWrapping="Wrap" Margin="0,0,0,6" VerticalAlignment="Center"
+                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Style.Triggers>
@@ -220,7 +240,9 @@
 
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="After download:" FontWeight="SemiBold" Margin="0,2,10,8" VerticalAlignment="Top"/>
                 <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,2,0,8">
-                    <!-- The two are exclusive (checking one unchecks the other in the view model); neither = plain download. -->
+                    <!-- The two are exclusive (checking one unchecks the other in the view model); none checked = plain download.
+                         Collapsed while Local Files is on (their values are kept). -->
+                    <StackPanel Visibility="{Binding IsNotLocalMode, Converter={StaticResource BoolToVis}}">
                     <CheckBox IsChecked="{Binding ExtractAfterDownload, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}" Margin="0,0,0,6">
                         <TextBlock TextWrapping="Wrap">
                             <Run Text="New Build" FontWeight="SemiBold"/>
@@ -233,7 +255,174 @@
                             <Run Text=" - Downloads the files, extracts them, then applies everything (Full_*.zip included) exactly like the Patch button: the current build is KEPT and new files are copied over it, overwriting only files with the same name. Partial Client folders are merged in order, nested archives unpacked, AdminClient/Bin flattened." Foreground="#FF666666"/>
                         </TextBlock>
                     </CheckBox>
-                    <TextBlock Text="Neither checked = just download the files into the Current Build directory, no extraction." Foreground="#FF666666" FontStyle="Italic" TextWrapping="Wrap"/>
+                    </StackPanel>
+
+                    <!-- Local Files: extract archives already on this PC instead of downloading. When on, the
+                         New Build / Patch options above collapse so the file list has room. -->
+                    <CheckBox IsChecked="{Binding UseLocalFiles, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}" Margin="0,0,0,6">
+                        <TextBlock TextWrapping="Wrap">
+                            <Run Text="Local Files" FontWeight="SemiBold"/>
+                            <Run Text=" - Skip Google Drive and work with what's already on this PC: extract .zip/.7z files into a tab, or transfer one tab's existing build into another." Foreground="#FF666666"/>
+                        </TextBlock>
+                    </CheckBox>
+
+                    <!-- Local Files sub-mode: Extract (archives on this PC) or Transfer (tab -> tab).
+                         Each shows its own panel below; switching keeps the other's state. -->
+                    <StackPanel Visibility="{Binding UseLocalFiles, Converter={StaticResource BoolToVis}}" Margin="20,0,0,6">
+                        <RadioButton GroupName="LocalSubMode" IsChecked="{Binding IsLocalExtractMode, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}" Margin="0,0,0,4">
+                            <TextBlock TextWrapping="Wrap">
+                                <Run Text="Extract local archives" FontWeight="SemiBold"/>
+                                <Run Text=" - Apply .zip/.7z files from this PC into the tab above, in the order listed." Foreground="#FF666666"/>
+                            </TextBlock>
+                        </RadioButton>
+                        <RadioButton GroupName="LocalSubMode" IsChecked="{Binding IsLocalTransferMode, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}">
+                            <TextBlock TextWrapping="Wrap">
+                                <Run Text="Transfer existing build content" FontWeight="SemiBold"/>
+                                <Run Text=" - Move everything from one build tab into another (build files, Documents, Version Number). The Source is left empty and shows its last known version." Foreground="#FF666666"/>
+                            </TextBlock>
+                        </RadioButton>
+                    </StackPanel>
+
+                    <Border Visibility="{Binding ShowLocalExtractPanel, Converter={StaticResource BoolToVis}}"
+                            BorderBrush="#33000000" BorderThickness="1" CornerRadius="4" Padding="8" Margin="20,0,0,6" Background="#FFF7FAFD">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,6">
+                                <Button DockPanel.Dock="Left" Content="Add Files..." Command="{Binding AddLocalFilesCommand}" Padding="10,3"/>
+                                <Button DockPanel.Dock="Left" Content="Clear" Command="{Binding ClearLocalFilesCommand}" Padding="10,3" Margin="6,0,0,0"/>
+                                <CheckBox IsChecked="{Binding LocalNewBuildFirst, Mode=TwoWay}" IsEnabled="{Binding IsNotBusy}"
+                                          VerticalAlignment="Center" Margin="14,0,0,0"
+                                          ToolTip="On: file #1 wipes the build folder and extracts fresh (New Build), every file after it is patched on top. Off: every file is patched onto the existing build.">
+                                    <TextBlock Text="Start with a New Build (wipe the build folder before file #1)" TextWrapping="Wrap"/>
+                                </CheckBox>
+                            </DockPanel>
+
+                            <DockPanel Margin="0,0,0,6" Visibility="{Binding HasLocalFiles, Converter={StaticResource BoolToVis}}">
+                                <TextBlock DockPanel.Dock="Left" Text="Version Number:" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                <TextBox Text="{Binding LocalVersionNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsNotBusy}"
+                                         MinWidth="160" MaxWidth="260" HorizontalAlignment="Left" VerticalContentAlignment="Center" Padding="3,2"
+                                         ToolTip="Stamped onto the target tab's Version Number when the extract finishes (e.g. 271.4.0 (1TC)). Leave blank to keep the tab's current one."/>
+                                <TextBlock Text="  leave blank to keep the tab's current version" Foreground="#FF888888" FontStyle="Italic" VerticalAlignment="Center"/>
+                            </DockPanel>
+
+                            <TextBlock Text="{Binding LocalFilesSummary}" Foreground="#FF666666" FontStyle="Italic" TextWrapping="Wrap" Margin="0,0,0,6"/>
+
+                            <ListBox x:Name="LocalFilesList" ItemsSource="{Binding LocalFiles}" MaxHeight="220" MinHeight="60"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch"
+                                     AllowDrop="True" IsEnabled="{Binding IsNotBusy}"
+                                     Visibility="{Binding HasLocalFiles, Converter={StaticResource BoolToVis}}"
+                                     PreviewMouseLeftButtonDown="LocalFiles_PreviewMouseLeftButtonDown"
+                                     PreviewMouseMove="LocalFiles_PreviewMouseMove"
+                                     DragOver="LocalFiles_DragOver"
+                                     DragLeave="LocalFiles_DragLeave"
+                                     Drop="LocalFiles_Drop">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:LocalExtractFileViewModel}">
+                                        <!-- DropTop/DropBottom: the blue insert bar shown while dragging (same look as
+                                             Settings' tab-card reorder). Overlaid on the row so showing one never
+                                             shifts the layout under the cursor - see BuildRepoView.xaml.cs. -->
+                                        <Grid>
+                                        <DockPanel Margin="0,2" Background="Transparent" Cursor="SizeAll" ToolTip="{Binding FullPath}">
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Cursor="Arrow">
+                                                <Button Content="✕" Width="26" Padding="0,1" ToolTip="Remove from list"
+                                                        Command="{Binding DataContext.RemoveLocalFileCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
+                                                        CommandParameter="{Binding}"/>
+                                            </StackPanel>
+                                            <TextBlock DockPanel.Dock="Left" Text="&#xE76F;" FontFamily="Segoe MDL2 Assets" Foreground="#FF999999"
+                                                       VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="Drag to reorder"/>
+                                            <TextBlock DockPanel.Dock="Left" Text="{Binding Position, StringFormat={}{0}.}" FontWeight="SemiBold"
+                                                       MinWidth="22" VerticalAlignment="Center"/>
+                                            <Border DockPanel.Dock="Left" CornerRadius="3" Padding="5,0" Margin="0,0,8,0" VerticalAlignment="Center">
+                                                <Border.Style>
+                                                    <Style TargetType="Border">
+                                                        <Setter Property="Background" Value="#FF3D85C6"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ModeText}" Value="New Build">
+                                                                <Setter Property="Background" Value="#FFB3261E"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Border.Style>
+                                                <TextBlock Text="{Binding ModeText}" Foreground="White" FontSize="11"/>
+                                            </Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis"/>
+                                                <TextBlock Text="{Binding Folder}" Foreground="#FF888888" FontSize="10.5" TextTrimming="CharacterEllipsis"/>
+                                            </StackPanel>
+                                        </DockPanel>
+                                        <Border x:Name="DropTop" Height="3" VerticalAlignment="Top" Margin="0,-2,0,0"
+                                                Background="#FF1E88E5" IsHitTestVisible="False" Visibility="Collapsed"/>
+                                        <Border x:Name="DropBottom" Height="3" VerticalAlignment="Bottom" Margin="0,0,0,-2"
+                                                Background="#FF1E88E5" IsHitTestVisible="False" Visibility="Collapsed"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Transfer panel (Local Files -> Transfer). Each dropdown leaves out whatever the other
+                         one has selected. -->
+                    <Border Visibility="{Binding UseTransfer, Converter={StaticResource BoolToVis}}"
+                            BorderBrush="#33000000" BorderThickness="1" CornerRadius="4" Padding="8" Margin="20,0,0,6" Background="#FFF7FAFD">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Source:" FontWeight="SemiBold" Margin="0,0,10,2" VerticalAlignment="Center"/>
+                            <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,2">
+                                <Button DockPanel.Dock="Right" Content="Open Folder" Command="{Binding OpenTransferSourceFolderCommand}" Padding="10,3" Margin="8,0,0,0"/>
+                                <ComboBox ItemsSource="{Binding TransferSourceOptions}" SelectedItem="{Binding TransferSource, Mode=TwoWay}"
+                                          DisplayMemberPath="TransferDisplay" MinWidth="220" HorizontalAlignment="Left"
+                                          IsEnabled="{Binding IsNotBusy}"/>
+                            </DockPanel>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding TransferSourcePathText}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#FF666666"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TransferSourceHasProblem}" Value="True">
+                                                <Setter Property="Foreground" Value="#FFB3261E"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="Target:" FontWeight="SemiBold" Margin="0,0,10,2" VerticalAlignment="Center"/>
+                            <DockPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,2">
+                                <Button DockPanel.Dock="Right" Content="Open Folder" Command="{Binding OpenTransferTargetFolderCommand}" Padding="10,3" Margin="8,0,0,0"/>
+                                <ComboBox ItemsSource="{Binding TransferTargetOptions}" SelectedItem="{Binding TransferTarget, Mode=TwoWay}"
+                                          DisplayMemberPath="TransferDisplay" MinWidth="220" HorizontalAlignment="Left"
+                                          IsEnabled="{Binding IsNotBusy}"/>
+                            </DockPanel>
+                            <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding TransferTargetPathText}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,8">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="#FF666666"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding TransferTargetHasProblem}" Value="True">
+                                                <Setter Property="Foreground" Value="#FFB3261E"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <TextBlock Grid.Row="4" Grid.ColumnSpan="2" Text="{Binding TransferSummary}" Foreground="#FF666666" FontStyle="Italic" TextWrapping="Wrap"/>
+                        </Grid>
+                    </Border>
+
+                    <TextBlock Text="None checked = just download the files into the Current Build directory, no extraction." Foreground="#FF666666" FontStyle="Italic" TextWrapping="Wrap"
+                               Visibility="{Binding IsNotLocalMode, Converter={StaticResource BoolToVis}}"/>
                 </StackPanel>
 
                 <DockPanel Grid.Row="4" Grid.ColumnSpan="2">

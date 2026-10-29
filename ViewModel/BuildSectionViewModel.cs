@@ -224,7 +224,8 @@ namespace CommandCenter.ViewModel
         // after reopening Settings - see TabSettings.LastVersionPushedToLive for when this gets set
         // (PushToLiveAsync, on the source tab) and auto-cleared (a new, non-blank Version Number).
         public bool HasLastVersionPushedToLive => !string.IsNullOrEmpty(_settings.LastVersionPushedToLive);
-        public string LastVersionPushedToLiveDisplay => $"Last version pushed to Live: {_settings.LastVersionPushedToLive}";
+        public string LastVersionPushedToLiveDisplay =>
+            $"Last version moved to {(string.IsNullOrWhiteSpace(_settings.LastVersionMovedTo) ? "Live" : _settings.LastVersionMovedTo)}: {_settings.LastVersionPushedToLive}";
 
         public bool HasBuildPath => !string.IsNullOrWhiteSpace(_settings.BuildPath) && Directory.Exists(_settings.BuildPath);
 
@@ -771,7 +772,7 @@ namespace CommandCenter.ViewModel
                     : $"This will remove the existing {SectionTitle} build at:\n{CurrentBuildPath}\n\nreplace it with the base file, then apply " +
                       $"{additionalPaths.Count} additional file{(additionalPaths.Count == 1 ? "" : "s")} on top of it, in order. Continue?";
 
-                var confirm = MessageBox.Show(
+                var confirm = ScrollableMessageBox.Show(
                     confirmMessage,
                     "Confirm New Build",
                     MessageBoxButton.YesNo,
@@ -830,7 +831,7 @@ namespace CommandCenter.ViewModel
             catch (Exception ex)
             {
                 StatusText = $"Update failed: {ex.Message}";
-                MessageBox.Show(ex.Message, "Update Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                ScrollableMessageBox.Show(ex.Message, "Update Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -879,6 +880,104 @@ namespace CommandCenter.ViewModel
             }
         }
 
+        // Moves EVERYTHING from another build tab into this tab: the source's Documents are merged
+        // into this tab's Documents folder, this tab adopts the source's Version Number, this
+        // tab's build folder is cleared and the source's build files are moved in
+        // (PushToLiveService), both tabs' Available Executables are rescanned, and the source is
+        // left empty - its Version Number cleared and LastVersionPushedToLive/LastVersionMovedTo
+        // recording what it used to hold. Used by Pushed to Live (tab source) and by the Build
+        // Repo tab's "Transfer Build" option. Does NOT touch IsBusy/StatusText - the caller owns
+        // those. Returns a non-empty note when the Documents merge didn't fully succeed.
+        public async Task<string> TransferFromTabAsync(TabSettings source, BuildSectionViewModel? sourceViewModel,
+            IProgress<UpdateProgress> progress, CancellationToken cancellationToken, bool saveSettings = true)
+        {
+            if (source == null) throw new ArgumentNullException(nameof(source));
+            if (ReferenceEquals(source, _settings))
+            {
+                throw new InvalidOperationException("The source and target tabs are the same tab.");
+            }
+            if (!HasValidBuildPath(source))
+            {
+                throw new DirectoryNotFoundException($"{source.Title} has no valid Current Build directory to transfer from.");
+            }
+            if (string.IsNullOrWhiteSpace(CurrentBuildPath))
+            {
+                throw new InvalidOperationException($"{SectionTitle} has no Current Build directory set. Set it in the Settings tab first.");
+            }
+
+            // A target whose folder was deleted (but whose path is still set) is fine - recreate it
+            // so HasBuildPath/DocumentsFolderLabel resolve normally below.
+            Directory.CreateDirectory(CurrentBuildPath);
+
+            string? previousSourceVersion = source.VersionNumber;
+            string documentsMergeNote = string.Empty;
+
+            // Snapshot where the source tab's documents currently live BEFORE anything changes.
+            // Prefer the source tab's OWN ViewModel's tracked folder (its literal
+            // _documentsFolderPath) over recomputing it - see pushed_to_live_documents_and_
+            // executables_sync.md CORRECTIONS for why.
+            string sourceDocsLabel = (sourceViewModel?.SupportsPushedToLive == true || string.IsNullOrWhiteSpace(previousSourceVersion))
+                ? DocumentsService.FallbackFolderName(source.Title)
+                : DocumentsService.VersionedFolderName(previousSourceVersion!);
+            string? computedSourceDocsPath = DocumentsService.FolderPathFor(source.BuildPath, sourceDocsLabel);
+            string? sourceDocsPath = sourceViewModel?.DocumentsFolderPath ?? computedSourceDocsPath;
+
+            // Adopt the source's Version Number up front (this runs SyncDocumentsFolder, landing
+            // this tab's Documents folder on the name that matches it) so the header already shows
+            // the version being carried over while the bigger move is still running.
+            _settings.VersionNumber = previousSourceVersion ?? string.Empty;
+
+            // Recompute the destination via DocumentsFolderLabel - the same property the header and
+            // Documents panel bind to - then merge the source's files into it.
+            string? destinationDocsPath = DocumentsService.FolderPathFor(CurrentBuildPath, DocumentsFolderLabel);
+            if (destinationDocsPath != null && sourceDocsPath != null && Directory.Exists(sourceDocsPath)
+                && !string.Equals(Path.GetFullPath(sourceDocsPath), Path.GetFullPath(destinationDocsPath), StringComparison.OrdinalIgnoreCase))
+            {
+                DocumentsService.EnsureFolder(destinationDocsPath);
+
+                bool merged = DocumentsService.TryRenameFolder(sourceDocsPath, destinationDocsPath, out string? mergeError);
+
+                Debug.WriteLine(
+                    $"[TransferFromTabAsync] Documents merge for {source.Title} -> {SectionTitle}: " +
+                    $"sourceDocsPath='{sourceDocsPath}' (computed='{computedSourceDocsPath}', fromSourceViewModel={sourceViewModel?.DocumentsFolderPath != null}), " +
+                    $"destinationDocsPath='{destinationDocsPath}', merged={merged}, error='{mergeError}'.");
+
+                if (!merged)
+                {
+                    documentsMergeNote = $" NOTE: Documents were not merged into {SectionTitle} ({mergeError}) - check {source.Title}'s Documents folder.";
+                }
+            }
+
+            RefreshDocumentsList();
+
+            await PushToLiveService.RunAsync(source.BuildPath, CurrentBuildPath, progress, cancellationToken);
+
+            // Build files just landed here and left the source - rescan both tabs' executables.
+            _settings.Executables = ExecutableScanner.ScanExecutables(CurrentBuildPath)
+                .Select(name => new TabExecutableEntry { FileName = name, IsEnabled = true })
+                .ToList();
+            source.Executables = ExecutableScanner.ScanExecutables(source.BuildPath)
+                .Select(name => new TabExecutableEntry { FileName = name, IsEnabled = true })
+                .ToList();
+
+            // Remember what the source used to hold (shown on its header and in Settings until a
+            // new Version Number is typed), then clear its Version Number - its folder is empty now.
+            if (!string.IsNullOrWhiteSpace(previousSourceVersion))
+            {
+                source.LastVersionPushedToLive = previousSourceVersion;
+                source.LastVersionMovedTo = SectionTitle;
+            }
+            source.VersionNumber = string.Empty;
+
+            if (saveSettings)
+            {
+                _settingsService.Save(_appSettings);
+            }
+
+            DiskSpaceStatusChanged?.Invoke(this, DiskSpaceService.CheckDiskSpace(CurrentBuildPath));
+            return documentsMergeNote;
+        }
+
         private bool CanPushToLive()
         {
             if (IsBusy || !SupportsPushedToLive || !HasBuildPath)
@@ -903,7 +1002,7 @@ namespace CommandCenter.ViewModel
             string sourceFolderPath = sourceTarget != null ? sourceTarget.Settings.BuildPath : PushSourceFolderPath;
             string sourceDescription = sourceTarget != null ? $"{sourceTarget.Settings.Title} ({sourceFolderPath})" : sourceFolderPath;
 
-            var confirm = MessageBox.Show(
+            var confirm = ScrollableMessageBox.Show(
                 $"This will move everything from:\n{sourceDescription}\n\ninto the {SectionTitle} Current Build folder:\n{CurrentBuildPath}\n\n" +
                 $"The {SectionTitle} folder will be cleared first, and then the entire contents of the source folder will be moved into it. This can't be undone. Continue?",
                 "Confirm Push to Live",
@@ -929,164 +1028,38 @@ namespace CommandCenter.ViewModel
                 StatusText = p.Status;
             });
 
-            // Captured up front (sourceTarget != null path only) so it survives past the point
-            // where this method changes VersionNumber (on both this tab and the source tab) out
-            // from under itself.
-            string? previousSourceVersion = sourceTarget?.Settings.VersionNumber;
-
-            // Set inside the sourceTarget-merge block below when the Documents merge didn't fully
-            // succeed - appended to the final success StatusText so a failure isn't invisible next
-            // to a "pushed to Live successfully" message that would otherwise read as "everything
-            // worked". See the merge block's own comments for exactly what this covers.
+            // Set when a tab-sourced push's Documents merge didn't fully succeed - appended to the
+            // final success StatusText so a failure isn't invisible. See TransferFromTabAsync.
             string documentsMergeNote = string.Empty;
 
             try
             {
                 if (sourceTarget != null)
                 {
-                    // Snapshot where the source tab's documents currently live BEFORE anything below
-                    // changes - computed the exact same way that tab's own BuildSectionViewModel
-                    // computes its own Documents folder (see SyncDocumentsFolder/DocumentsService),
-                    // using the version it still has right now.
-                    string sourceDocsLabel = string.IsNullOrWhiteSpace(previousSourceVersion)
-                        ? DocumentsService.FallbackFolderName(sourceTarget.Settings.Title)
-                        : DocumentsService.VersionedFolderName(previousSourceVersion!);
-                    string? computedSourceDocsPath = DocumentsService.FolderPathFor(sourceTarget.Settings.BuildPath, sourceDocsLabel);
-
-                    // Prefer asking the source tab's OWN BuildSectionViewModel what it actually
-                    // thinks its current Documents folder is (its literal _documentsFolderPath,
-                    // exposed as DocumentsFolderPath - see that property and
-                    // PushTargetOption.SourceViewModel) rather than trusting the recomputed
-                    // `computedSourceDocsPath` above blindly. Both should always agree - they read
-                    // the exact same TabSettings instance (see RebuildPushTargets/
-                    // CreateBuildSectionViewModel) - but this exact merge has silently failed across
-                    // multiple previous "fix" attempts in ways static reading never caught (see
-                    // pushed_to_live_documents_and_executables_sync.md CORRECTIONS), so this goes
-                    // straight to the source of truth instead of re-deriving it and hoping. Falls
-                    // back to the computed value only if no source ViewModel reference is available
-                    // at all (e.g. some future caller constructs a PushTargetOption without one).
-                    string? sourceDocsPath = sourceTarget.SourceViewModel?.DocumentsFolderPath ?? computedSourceDocsPath;
-
-                    // Adopt Live's new Version Number - and with it, whichever Documents folder
-                    // belongs to that version for THIS tab (see SyncDocumentsFolder) - before the
-                    // (potentially long-running) build-file move even starts, so this tab's own
-                    // header/Documents-folder-label already reflect the version being adopted while
-                    // the bigger move is still going, rather than only catching up once it's done.
-                    _settings.VersionNumber = previousSourceVersion ?? string.Empty;
-
-                    // Recompute the destination explicitly via DocumentsFolderLabel - the exact same
-                    // public property the header/Documents panel bind to - rather than trusting
-                    // _documentsFolderPath was already landed correctly by the SyncDocumentsFolder
-                    // call the assignment above just triggered. For a Live-capable tab (this one -
-                    // PushToLiveAsync is only ever called on a section with SupportsPushedToLive),
-                    // DocumentsFolderLabel as of 2026-09-11 always resolves to the plain fallback
-                    // name ("{SectionTitle} Documents"), never a version-family name - see that
-                    // property's own comment. That means this destination path is now the SAME
-                    // every single push, regardless of which version is being adopted, which is the
-                    // whole point: there's no "does the version-named folder that was just created
-                    // actually match what gets merged into" class of drift left to have, because
-                    // there's no version-dependent naming on this side anymore. EnsureFolder
-                    // guarantees the destination actually exists on disk before the merge below.
-                    string? destinationDocsPath = DocumentsService.FolderPathFor(CurrentBuildPath, DocumentsFolderLabel);
-
-                    // Merge the source's actual files into that destination - DocumentsService.
-                    // TryRenameFolder copies everything over (overwriting any same-named file/folder
-                    // rather than duplicating it) and then deletes the now-emptied source folder; if
-                    // anything about the copy fails partway, the source folder is left in place
-                    // rather than losing anything, but - unlike the old silent RenameFolder call this
-                    // replaced - the failure is now captured instead of discarded, logged via
-                    // Debug.WriteLine, and folded into documentsMergeNote so it shows up in the
-                    // final StatusText too. This is diagnostic instrumentation added 2026-09-11
-                    // specifically because this exact merge has appeared to work (no exception, no
-                    // visible error) while actually doing nothing, on every previous "fix" attempt in
-                    // this area - see pushed_to_live_documents_and_executables_sync.md CORRECTIONS.
-                    // Clearing the source tab's own Version Number further down runs THAT tab's own
-                    // SyncDocumentsFolder, which (if this merge actually succeeded) finds nothing
-                    // left to carry over and just creates a fresh, empty fallback-named folder there
-                    // - "the directory is now empty for the old source version," as originally asked
-                    // for. If this merge did NOT succeed, that same later call will instead find the
-                    // real files still sitting there and carry THEM over to the fallback name - which
-                    // is exactly the reported bug, now something documentsMergeNote will flag instead
-                    // of silently reproducing.
-                    if (destinationDocsPath != null)
-                    {
-                        DocumentsService.EnsureFolder(destinationDocsPath);
-
-                        bool merged = DocumentsService.TryRenameFolder(sourceDocsPath, destinationDocsPath, out string? mergeError);
-
-                        int filesAtDestination;
-                        try
-                        {
-                            filesAtDestination = Directory.Exists(destinationDocsPath)
-                                ? Directory.GetFiles(destinationDocsPath, "*", SearchOption.AllDirectories).Length
-                                : 0;
-                        }
-                        catch
-                        {
-                            filesAtDestination = -1;
-                        }
-
-                        Debug.WriteLine(
-                            $"[PushToLiveAsync] Documents merge for {sourceTarget.Settings.Title} -> {SectionTitle}: " +
-                            $"sourceDocsPath='{sourceDocsPath}' (computed='{computedSourceDocsPath}', fromSourceViewModel={sourceTarget.SourceViewModel?.DocumentsFolderPath != null}), " +
-                            $"destinationDocsPath='{destinationDocsPath}', merged={merged}, error='{mergeError}', filesAtDestinationAfter={filesAtDestination}.");
-
-                        if (!merged)
-                        {
-                            documentsMergeNote = $" NOTE: Documents were not merged into Live ({mergeError}) - check {sourceTarget.Settings.Title}'s Documents folder.";
-                        }
-                    }
-
-                    // Refresh directly rather than waiting on the FileSystemWatcher's async
-                    // Dispatcher.BeginInvoke round trip - that's what made the Documents panel look
-                    // like it only updated well after everything else had finished.
-                    RefreshDocumentsList();
+                    // Tab-sourced push: the whole move (Documents merge, version carry-over, build
+                    // move, Executables rescan on both tabs, source Version cleared + "last version"
+                    // note) lives in TransferFromTabAsync so the Build Repo tab's "Transfer Build"
+                    // option runs exactly the same logic between any two build tabs.
+                    documentsMergeNote = await TransferFromTabAsync(sourceTarget.Settings, sourceTarget.SourceViewModel,
+                        progress, _updateCancellation.Token, saveSettings: false);
                 }
-
-                await PushToLiveService.RunAsync(sourceFolderPath, CurrentBuildPath, progress, _updateCancellation.Token);
-
-                // The build files just landed in CurrentBuildPath - for every Pushed to Live, not
-                // only a tab-sourced one - so rescan this tab's own Available Executables the same
-                // way Settings would. Without this, Settings kept showing 0 (or whatever was there
-                // before) instead of what's actually sitting in the folder now, since nothing else
-                // triggers a rescan outside of Settings being opened.
-                _settings.Executables = ExecutableScanner.ScanExecutables(CurrentBuildPath)
-                    .Select(name => new TabExecutableEntry { FileName = name, IsEnabled = true })
-                    .ToList();
-
-                if (sourceTarget != null)
+                else
                 {
-                    // The source tab's build folder is now actually empty (the move above just
-                    // finished), so rescan its Available Executables too - nothing left on disk
-                    // means nothing should stick around in its launch dropdown just because nothing
-                    // else happened to trigger a rescan.
-                    sourceTarget.Settings.Executables = ExecutableScanner.ScanExecutables(sourceTarget.Settings.BuildPath)
+                    await PushToLiveService.RunAsync(sourceFolderPath, CurrentBuildPath, progress, _updateCancellation.Token);
+
+                    // The build files just landed in CurrentBuildPath - rescan this tab's own
+                    // Available Executables the same way Settings would.
+                    _settings.Executables = ExecutableScanner.ScanExecutables(CurrentBuildPath)
                         .Select(name => new TabExecutableEntry { FileName = name, IsEnabled = true })
                         .ToList();
 
-                    // Remember what this tab was pushed to Live under - shown next to its Version
-                    // Number field in Settings until a new version is typed there (see
-                    // TabSettings.LastVersionPushedToLive and its auto-clear) - then clear the source
-                    // tab's own Version Number, since there's nothing left in its build folder to
-                    // launch under that version anymore. Raises the source tab's own
-                    // Settings_PropertyChanged, refreshing its bindings (HasBuildPath,
-                    // ExecutableOptions off the list just reassigned, Documents list, etc.) and
-                    // running its own SyncDocumentsFolder.
-                    if (!string.IsNullOrWhiteSpace(previousSourceVersion))
+                    if (!string.IsNullOrWhiteSpace(PendingVersion))
                     {
-                        sourceTarget.Settings.LastVersionPushedToLive = previousSourceVersion;
+                        // Setting VersionNumber raises Settings_PropertyChanged -> SyncDocumentsFolder,
+                        // which carries this section's existing Documents folder over.
+                        _settings.VersionNumber = PendingVersion;
+                        PendingVersion = string.Empty;
                     }
-
-                    sourceTarget.Settings.VersionNumber = string.Empty;
-                }
-                else if (!string.IsNullOrWhiteSpace(PendingVersion))
-                {
-                    // Setting VersionNumber raises Settings_PropertyChanged -> SyncDocumentsFolder,
-                    // which carries this section's existing Documents folder over to the new
-                    // version-named folder - "along with the build, keep the documents with the
-                    // build" for Pushed to Live specifically asked for.
-                    _settings.VersionNumber = PendingVersion;
-                    PendingVersion = string.Empty;
                 }
 
                 // One save covers every mutation above - this tab's own Executables/VersionNumber
@@ -1108,7 +1081,7 @@ namespace CommandCenter.ViewModel
             catch (Exception ex)
             {
                 StatusText = $"Push to Live failed: {ex.Message}";
-                MessageBox.Show(ex.Message, "Push to Live Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                ScrollableMessageBox.Show(ex.Message, "Push to Live Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -1230,7 +1203,7 @@ namespace CommandCenter.ViewModel
             if (!File.Exists(fullPath))
             {
                 StatusText = $"{SelectedExecutable} was not found in the build folder.";
-                MessageBox.Show(StatusText, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                ScrollableMessageBox.Show(StatusText, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -1268,7 +1241,7 @@ namespace CommandCenter.ViewModel
             catch (Exception ex)
             {
                 StatusText = $"Launch failed: {ex.Message}";
-                MessageBox.Show(ex.Message, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                ScrollableMessageBox.Show(ex.Message, "Launch Failed", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -1312,7 +1285,7 @@ namespace CommandCenter.ViewModel
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 StatusText = $"Couldn't import {Path.GetFileName(dialog.FileName)}: {ex.Message}";
-                MessageBox.Show(ex.Message, "Import Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+                ScrollableMessageBox.Show(ex.Message, "Import Failed", MessageBoxButton.OK, MessageBoxImage.Error);
                 return;
             }
 
@@ -1362,7 +1335,7 @@ namespace CommandCenter.ViewModel
         // cmd_uidebug.txt in the build folder too).
         private void DeleteDebugCommand(string existing)
         {
-            var result = MessageBox.Show(
+            var result = ScrollableMessageBox.Show(
                 $"Delete the debug command \"{existing}\"?\n\nThis can't be undone.",
                 "Delete Debug Command",
                 MessageBoxButton.YesNo,
@@ -1776,7 +1749,7 @@ namespace CommandCenter.ViewModel
         private void DeleteDocument(DocumentEntry entry)
         {
             string kind = entry.IsDirectory ? "folder" : "file";
-            var result = MessageBox.Show(
+            var result = ScrollableMessageBox.Show(
                 $"Delete the {kind} \"{entry.Name}\"?\n\nThis can't be undone.",
                 "Delete Document",
                 MessageBoxButton.YesNo,

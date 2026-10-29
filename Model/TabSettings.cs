@@ -27,6 +27,7 @@ namespace CommandCenter.Model
         private List<TabExecutableEntry> _executables = new();
         private string _lastSelectedExecutable = string.Empty;
         private string? _lastVersionPushedToLive;
+        private string? _lastVersionMovedTo;
 
         public Guid Id { get; set; } = Guid.NewGuid();
         public TabKind Kind { get; set; }
@@ -88,6 +89,7 @@ namespace CommandCenter.Model
                     if (!string.IsNullOrWhiteSpace(value) && !string.IsNullOrEmpty(_lastVersionPushedToLive))
                     {
                         LastVersionPushedToLive = null;
+                        LastVersionMovedTo = null;
                     }
                 }
             }
@@ -105,6 +107,16 @@ namespace CommandCenter.Model
         {
             get => _lastVersionPushedToLive;
             set { if (_lastVersionPushedToLive != value) { _lastVersionPushedToLive = value; OnPropertyChanged(); } }
+        }
+
+        // Title of the tab LastVersionPushedToLive was moved INTO (e.g. "Live", or "CMS" when the
+        // Build Repo tab's Transfer Build moved GMS into CMS). Null for notes recorded before this
+        // field existed - displays fall back to "Live". Cleared together with
+        // LastVersionPushedToLive by the VersionNumber auto-clear above.
+        public string? LastVersionMovedTo
+        {
+            get => _lastVersionMovedTo;
+            set { if (_lastVersionMovedTo != value) { _lastVersionMovedTo = value; OnPropertyChanged(); } }
         }
 
         // BuildSection tabs only, and only ever set for a tab that was NEW when this was toggled -

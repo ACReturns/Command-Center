@@ -92,14 +92,6 @@
                                            VerticalAlignment="Center" Margin="12,0,0,0" FontStyle="Italic" Foreground="#FF666666"/>
                             </StackPanel>
 
-                            <!-- Only offered while this tab is brand-new (not yet saved) - see
-                                 DraftTabViewModel.CanTogglePushedToLive for why an already-saved tab can't
-                                 flip this after the fact. Once saved, the row disappears; whatever was
-                                 chosen here is locked in for this tab's lifetime. -->
-                            <CheckBox Content="Enable &quot;Pushed to Live&quot; for this tab" Margin="0,0,0,10"
-                                      IsChecked="{Binding SupportsPushedToLive}"
-                                      Visibility="{Binding CanTogglePushedToLive, Converter={StaticResource BoolToVis}}"
-                                      ToolTip="Lets this tab pull a finished build straight from another tab's Current Build folder instead of only extracting an archive."/>
 
                             <!-- Available Servers: this tab's own launch dropdown - built-in entries (seeded
                                  from LaunchServerCatalog, connect/disconnect only) and custom ones (added via

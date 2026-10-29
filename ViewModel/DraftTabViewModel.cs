@@ -100,7 +100,10 @@ namespace CommandCenter.ViewModel
             servers: settings.Servers ?? Enumerable.Empty<TabServerEntry>(),
             executables: settings.Executables,
             supportsPushedToLive: settings.SupportsPushedToLive,
-            customIconPath: settings.CustomIconPath);
+            customIconPath: settings.CustomIconPath)
+        {
+            LastVersionMovedTo = settings.LastVersionMovedTo
+        };
 
         // Always a BuildSection tab - Server Status/Settings are singletons, never created via
         // "+ Add Tab". Starts with no servers - same as any other brand-new General tab (see
@@ -229,18 +232,17 @@ namespace CommandCenter.ViewModel
         // Number field in SettingsView - only meaningful (and only ever true) for a BuildSection tab.
         public bool HasLastVersionPushedToLive => !string.IsNullOrEmpty(LastVersionPushedToLive);
 
-        public string LastVersionPushedToLiveDisplay => $"Last version pushed to Live: {LastVersionPushedToLive}";
+        public string LastVersionPushedToLiveDisplay =>
+            $"Last version moved to {(string.IsNullOrWhiteSpace(LastVersionMovedTo) ? "Live" : LastVersionMovedTo)}: {LastVersionPushedToLive}";
 
-        // "Enable Pushed to Live" - scoped to brand-new tabs only (IsNew), not every extra, so an
-        // already-saved tab's Pushed to Live availability can never be flipped after the fact
-        // without deleting and recreating it. That's a deliberate simplification: BuildSectionViewModel
-        // only ever reads SupportsPushedToLive once, at construction (see MainViewModel.
-        // CreateBuildSectionViewModel) - a tab that survives a Save keeps the same live
-        // BuildSectionViewModel instance rather than getting a new one, so toggling this on an
-        // existing tab would silently do nothing until the app restarted. Restricting the checkbox
-        // to IsNew sidesteps that entirely, since a brand-new tab always gets a freshly constructed
-        // BuildSectionViewModel the moment it's first saved (MainViewModel.OnSettingsTabsCommitted).
-        public bool CanTogglePushedToLive => IsBuildSection && IsNew;
+        // Which tab LastVersionPushedToLive was moved into (see TabSettings.LastVersionMovedTo) -
+        // display only; Settings never writes it back.
+        public string? LastVersionMovedTo { get; private init; }
+
+        // Fixed at creation and no longer user-toggleable: the "Enable Pushed to Live" checkbox for
+        // new tabs was removed once the Build Repo tab's "Transfer Build" option could move any build
+        // tab into any other. New tabs are created false; the permanent Live tab (and any extra tab
+        // that was created with it on before the checkbox was removed) keeps its value round-tripped.
 
         public bool SupportsPushedToLive
         {

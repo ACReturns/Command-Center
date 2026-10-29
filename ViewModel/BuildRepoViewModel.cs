@@ -63,6 +63,15 @@ namespace CommandCenter.ViewModel
         /// <summary>A Full folder inside a build - always applied before any Partial in a batch.</summary>
         public bool IsFullFolder => Kind == BuildRepoNodeKind.Folder && FullFolderPattern.IsMatch(Name);
 
+        /// <summary>Full folder or Full_*.zip/.7z file - tagged "New Build" in the tree.</summary>
+        public bool IsFullItem => IsFullFolder || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsFullArchive(Name));
+
+        /// <summary>Partial folder or Partial_*.zip/.7z file - tagged "Patch" in the tree.</summary>
+        public bool IsPartialItem => (Kind == BuildRepoNodeKind.Folder && PartialFolderPattern.IsMatch(Name))
+                                     || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsPartialArchive(Name));
+
+        public bool HasModeTag => IsFullItem || IsPartialItem;
+
         /// <summary>
         /// A Full or Partial folder inside a build - these get a checkbox so several can be
         /// batch-downloaded and applied one after another (Full first, then tree order) in one run.
@@ -218,6 +227,10 @@ namespace CommandCenter.ViewModel
         public string Title => Settings.Title;
         public string BuildPath => Settings.BuildPath;
         public bool HasBuildPath => !string.IsNullOrWhiteSpace(Settings.BuildPath);
+        public bool BuildFolderExists => HasBuildPath && Directory.Exists(Settings.BuildPath);
+        public string VersionText => string.IsNullOrWhiteSpace(Settings.VersionNumber) ? "Version not set" : Settings.VersionNumber;
+        // Transfer Build dropdowns: "GMS (271.0.3)".
+        public string TransferDisplay => $"{Title} ({VersionText})";
         public override string ToString() => Title;
     }
 
@@ -259,6 +272,13 @@ namespace CommandCenter.ViewModel
         private string _logText = string.Empty;
         private bool _isAwaitingResume;
         private TaskCompletionSource<bool>? _resumeDecision;
+        private bool _useLocalFiles;
+        private bool _localNewBuildFirst;
+        private string _localVersionNumber = string.Empty;
+        // Local Files sub-mode: false = extract archives (original behavior), true = Transfer Build.
+        private bool _localTransferMode;
+        private BuildRepoTargetOption? _transferSource;
+        private BuildRepoTargetOption? _transferTarget;
 
         public BuildRepoViewModel(AppSettings appSettings, SettingsService settingsService,
             Func<IEnumerable<TabSettings>> tabsProvider, Func<Guid, BuildSectionViewModel?> findBuildSection)
@@ -282,6 +302,16 @@ namespace CommandCenter.ViewModel
             OpenBuildFolderCommand = new RelayCommand(_ => OpenFolder(SelectedTarget?.BuildPath),
                 _ => SelectedTarget?.HasBuildPath == true);
             ClearBatchCommand = new RelayCommand(_ => ClearBatch(), _ => IsBatchMode && !IsBusy);
+
+            AddLocalFilesCommand = new RelayCommand(_ => AddLocalFiles(), _ => !IsBusy);
+            ClearLocalFilesCommand = new RelayCommand(_ => LocalFiles.Clear(), _ => !IsBusy && LocalFiles.Count > 0);
+            RemoveLocalFileCommand = new RelayCommand(p => { if (p is LocalExtractFileViewModel f) LocalFiles.Remove(f); }, _ => !IsBusy);
+            LocalFiles.CollectionChanged += (_, _) => OnLocalFilesChanged();
+
+            OpenTransferSourceFolderCommand = new RelayCommand(_ => OpenFolder(TransferSource?.BuildPath),
+                _ => TransferSource?.HasBuildPath == true);
+            OpenTransferTargetFolderCommand = new RelayCommand(_ => OpenFolder(TransferTarget?.BuildPath),
+                _ => TransferTarget?.HasBuildPath == true);
         }
 
         // ---------- Bindable state ----------
@@ -461,12 +491,317 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public string DownloadButtonText => (ExtractAfterDownload ? "Download & New Build"
-            : PatchAfterDownload ? "Download & Patch"
-            : "Download") + (IsBatchMode ? $" ({_batch.Count} folders)" : "");
+        public string DownloadButtonText => UseTransfer
+            ? "Transfer Build"
+            : UseLocalFiles
+            ? $"Extract Local Files ({LocalFiles.Count})"
+            : (ExtractAfterDownload ? "Download & New Build"
+               : PatchAfterDownload ? "Download & Patch"
+               : "Download") + (IsBatchMode ? $" ({_batch.Count} folders)" : "");
 
-        public bool CanDownload => !IsBusy && SelectedTarget?.HasBuildPath == true
-                                   && (IsBatchMode || SelectedNode?.CanDownload == true);
+        public bool CanDownload => !IsBusy && (UseTransfer
+            ? CanTransfer
+            : SelectedTarget?.HasBuildPath == true
+              && (UseLocalFiles
+                  ? LocalFiles.Count > 0
+                  : IsBatchMode || SelectedNode?.CanDownload == true));
+
+        // ---------- Local Files (extract archives already on this PC) ----------
+
+        /// <summary>
+        /// "Local Files" option: skip Google Drive and apply .zip/.7z files picked from this PC, in the
+        /// order they're listed. While on, the New Build / Patch download options collapse (their
+        /// values are kept, not cleared) so the file list has room. Transient - not saved.
+        /// </summary>
+        public bool UseLocalFiles
+        {
+            get => _useLocalFiles;
+            set
+            {
+                if (!SetProperty(ref _useLocalFiles, value)) return;
+                if (value && _localTransferMode) RebuildTransferOptions();
+                RaiseLocalSubModeChanged();
+                OnPropertyChanged(nameof(IsNotLocalMode));
+                OnPropertyChanged(nameof(DownloadButtonText));
+                OnPropertyChanged(nameof(CanDownload));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+            }
+        }
+
+        // True only in plain Drive-download mode - hides New Build/Patch while Local Files is on
+        // (their values are kept).
+        public bool IsNotLocalMode => !UseLocalFiles;
+
+        // ---------- Transfer Build (move one build tab's content into another) ----------
+
+        /// <summary>
+        /// Local Files has two sub-modes, picked by the radio pair inside its panel:
+        /// "Extract local archives" (the original Local Files behavior) and "Transfer existing build
+        /// content" - move EVERYTHING from one build tab (Source) into another (Target): build files,
+        /// Documents, Version Number - using the same logic as a tab-sourced Pushed to Live
+        /// (BuildSectionViewModel.TransferFromTabAsync). The Target's build folder is cleared first;
+        /// the Source is left empty with its Version Number cleared and its "Last version moved to
+        /// ..." note set. The sub-mode is remembered while Local Files is toggled off/on. Transient.
+        /// </summary>
+        public bool IsLocalTransferMode
+        {
+            get => _localTransferMode;
+            set
+            {
+                if (!SetProperty(ref _localTransferMode, value)) return;
+                if (value) RebuildTransferOptions();
+                RaiseLocalSubModeChanged();
+            }
+        }
+
+        public bool IsLocalExtractMode
+        {
+            get => !_localTransferMode;
+            set { if (value) IsLocalTransferMode = false; }
+        }
+
+        // Transfer Build is active: Local Files on AND the Transfer sub-mode picked.
+        public bool UseTransfer => UseLocalFiles && _localTransferMode;
+        public bool IsNotTransferMode => !UseTransfer;
+        // The archive-extract panel (Add Files / list) - Local Files on with Extract picked.
+        public bool ShowLocalExtractPanel => UseLocalFiles && !_localTransferMode;
+
+        private void RaiseLocalSubModeChanged()
+        {
+            OnPropertyChanged(nameof(IsLocalTransferMode));
+            OnPropertyChanged(nameof(IsLocalExtractMode));
+            OnPropertyChanged(nameof(UseTransfer));
+            OnPropertyChanged(nameof(IsNotTransferMode));
+            OnPropertyChanged(nameof(ShowLocalExtractPanel));
+            OnPropertyChanged(nameof(DownloadButtonText));
+            OnPropertyChanged(nameof(CanDownload));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        // Each list holds every build tab except whatever the OTHER dropdown has selected, so the
+        // same tab can never be picked on both sides.
+        public ObservableCollection<BuildRepoTargetOption> TransferSourceOptions { get; } = new();
+        public ObservableCollection<BuildRepoTargetOption> TransferTargetOptions { get; } = new();
+
+        public BuildRepoTargetOption? TransferSource
+        {
+            get => _transferSource;
+            set
+            {
+                if (!SetProperty(ref _transferSource, value)) return;
+                SyncTransferList(TransferTargetOptions, exclude: value);
+                OnTransferSelectionChanged();
+            }
+        }
+
+        public BuildRepoTargetOption? TransferTarget
+        {
+            get => _transferTarget;
+            set
+            {
+                if (!SetProperty(ref _transferTarget, value)) return;
+                SyncTransferList(TransferSourceOptions, exclude: value);
+                OnTransferSelectionChanged();
+            }
+        }
+
+        public bool CanTransfer => TransferSource != null && TransferTarget != null
+                                   && !ReferenceEquals(TransferSource, TransferTarget)
+                                   && TransferSource.BuildFolderExists && TransferTarget.HasBuildPath;
+
+        public string TransferSourcePathText => TransferSource == null
+            ? "Pick the tab to move the build out of."
+            : !TransferSource.HasBuildPath
+                ? "This tab has no Current Build directory set - set one in Settings first."
+                : !TransferSource.BuildFolderExists
+                    ? $"Folder not found: {TransferSource.BuildPath}"
+                    : TransferSource.BuildPath;
+
+        public string TransferTargetPathText => TransferTarget == null
+            ? "Pick the tab to move the build into."
+            : TransferTarget.HasBuildPath
+                ? TransferTarget.BuildPath
+                : "This tab has no Current Build directory set - set one in Settings first.";
+
+        public bool TransferSourceHasProblem => TransferSource != null && !TransferSource.BuildFolderExists;
+        public bool TransferTargetHasProblem => TransferTarget != null && !TransferTarget.HasBuildPath;
+
+        public string TransferSummary => TransferSource == null || TransferTarget == null
+            ? "Pick a Source and a Target tab."
+            : $"{TransferTarget.Title}'s build folder is cleared, then everything in {TransferSource.Title} (build files, Documents) " +
+              $"is moved into it. {TransferTarget.Title}'s Version Number becomes {TransferSource.VersionText}; " +
+              $"{TransferSource.Title} is left empty and shows \"Last version moved to {TransferTarget.Title}\".";
+
+        public RelayCommand OpenTransferSourceFolderCommand { get; }
+        public RelayCommand OpenTransferTargetFolderCommand { get; }
+
+        private void OnTransferSelectionChanged()
+        {
+            OnPropertyChanged(nameof(CanTransfer));
+            OnPropertyChanged(nameof(TransferSourcePathText));
+            OnPropertyChanged(nameof(TransferTargetPathText));
+            OnPropertyChanged(nameof(TransferSourceHasProblem));
+            OnPropertyChanged(nameof(TransferTargetHasProblem));
+            OnPropertyChanged(nameof(TransferSummary));
+            OnPropertyChanged(nameof(CanDownload));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        // Fresh options from the current tabs (versions/paths re-read), keeping each side's pick by Id.
+        private void RebuildTransferOptions()
+        {
+            var sourceId = _transferSource?.Id;
+            var targetId = _transferTarget?.Id;
+
+            var all = _tabsProvider()
+                .Where(t => t.Kind == TabKind.BuildSection)
+                .OrderBy(t => t.Order)
+                .Select(t => new BuildRepoTargetOption(t))
+                .ToList();
+
+            var source = all.FirstOrDefault(o => o.Id == sourceId);
+            var target = all.FirstOrDefault(o => o.Id == targetId);
+            if (source != null && target != null && source.Id == target.Id) target = null;
+
+            // Assign through the fields, then fill both lists, then announce - avoids the ComboBoxes
+            // seeing their SelectedItem missing from ItemsSource mid-rebuild.
+            _transferSource = null;
+            _transferTarget = null;
+            OnPropertyChanged(nameof(TransferSource));
+            OnPropertyChanged(nameof(TransferTarget));
+
+            TransferSourceOptions.Clear();
+            TransferTargetOptions.Clear();
+            foreach (var o in all)
+            {
+                if (target == null || o.Id != target.Id) TransferSourceOptions.Add(o);
+                if (source == null || o.Id != source.Id) TransferTargetOptions.Add(o);
+            }
+
+            _transferSource = source;
+            _transferTarget = target;
+            OnPropertyChanged(nameof(TransferSource));
+            OnPropertyChanged(nameof(TransferTarget));
+            OnTransferSelectionChanged();
+        }
+
+        // Makes `list` = every option except `exclude`, in tab order, touching only the one item that
+        // has to come out or go back in (so the other ComboBox's current selection is never disturbed).
+        private void SyncTransferList(ObservableCollection<BuildRepoTargetOption> list, BuildRepoTargetOption? exclude)
+        {
+            var all = TransferSourceOptions.Concat(TransferTargetOptions)
+                .GroupBy(o => o.Id).Select(g => g.First())
+                .OrderBy(o => o.Settings.Order)
+                .ToList();
+
+            for (int i = list.Count - 1; i >= 0; i--)
+            {
+                if (exclude != null && list[i].Id == exclude.Id) list.RemoveAt(i);
+            }
+
+            int index = 0;
+            foreach (var o in all)
+            {
+                if (exclude != null && o.Id == exclude.Id) continue;
+                if (index >= list.Count || list[index].Id != o.Id)
+                {
+                    if (!list.Any(x => x.Id == o.Id)) list.Insert(index, o);
+                }
+                index++;
+            }
+        }
+
+        /// <summary>
+        /// When on, the FIRST file in the list runs as New Build (the build folder is wiped first) and
+        /// every file after it as Patch. When off, every file is a Patch on top of the current build.
+        /// </summary>
+        public bool LocalNewBuildFirst
+        {
+            get => _localNewBuildFirst;
+            set
+            {
+                if (SetProperty(ref _localNewBuildFirst, value)) RenumberLocalFiles();
+            }
+        }
+
+        public ObservableCollection<LocalExtractFileViewModel> LocalFiles { get; } = new();
+
+        /// <summary>
+        /// Optional Version Number for a local run (shown once a file is listed). Stamped onto the
+        /// target tab when the extract succeeds; blank = leave the tab's current Version Number alone.
+        /// </summary>
+        public string LocalVersionNumber
+        {
+            get => _localVersionNumber;
+            set => SetProperty(ref _localVersionNumber, value ?? string.Empty);
+        }
+
+        public bool HasLocalFiles => LocalFiles.Count > 0;
+
+        public string LocalFilesSummary => LocalFiles.Count == 0
+            ? "No files added yet - click Add Files... (you can pick several at once)."
+            : $"{LocalFiles.Count} file(s), {FormatBytes(LocalFiles.Sum(f => f.SizeBytes))} - applied top to bottom. Drag rows (or use ▲/▼) to change the order.";
+
+        public RelayCommand AddLocalFilesCommand { get; }
+        public RelayCommand ClearLocalFilesCommand { get; }
+        public RelayCommand RemoveLocalFileCommand { get; }
+
+        private void AddLocalFiles()
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select build/patch archives to extract",
+                Filter = "Build/Patch Archives (*.zip;*.7z)|*.zip;*.7z|Zip Archives (*.zip)|*.zip|7-Zip Archives (*.7z)|*.7z",
+                CheckFileExists = true,
+                Multiselect = true
+            };
+            if (dialog.ShowDialog() != true) return;
+
+            // Natural sort the picked batch ("Partial 2" before "Partial 10") and put any Full_* first,
+            // then append after whatever's already listed. Duplicates are skipped.
+            var picked = dialog.FileNames
+                .Where(f => LocalFiles.All(x => !string.Equals(x.FullPath, f, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(f => BuildRepoDefaults.IsFullArchive(f) ? 0 : 1)
+                .ThenBy(f => Path.GetFileName(f), NaturalStringComparer.Instance)
+                .ToList();
+
+            // First add into an empty list that starts with a Full_* archive: default to New Build for it.
+            if (LocalFiles.Count == 0 && picked.Count > 0 && BuildRepoDefaults.IsFullArchive(picked[0]))
+            {
+                _localNewBuildFirst = true;
+                OnPropertyChanged(nameof(LocalNewBuildFirst));
+            }
+
+            foreach (var f in picked) LocalFiles.Add(new LocalExtractFileViewModel(f));
+        }
+
+        /// <summary>Moves a row - drag-and-drop in BuildRepoView lands here.</summary>
+        public void MoveLocalFile(int from, int to)
+        {
+            if (IsBusy || from < 0 || from >= LocalFiles.Count) return;
+            to = Math.Clamp(to, 0, LocalFiles.Count - 1);
+            if (from == to) return;
+            LocalFiles.Move(from, to);
+        }
+
+        private void OnLocalFilesChanged()
+        {
+            RenumberLocalFiles();
+            OnPropertyChanged(nameof(HasLocalFiles));
+            OnPropertyChanged(nameof(LocalFilesSummary));
+            OnPropertyChanged(nameof(DownloadButtonText));
+            OnPropertyChanged(nameof(CanDownload));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        private void RenumberLocalFiles()
+        {
+            for (int i = 0; i < LocalFiles.Count; i++)
+            {
+                LocalFiles[i].Position = i + 1;
+                LocalFiles[i].ModeText = i == 0 && LocalNewBuildFirst ? "New Build" : "Patch";
+            }
+        }
 
         public bool IsBusy
         {
@@ -522,6 +857,7 @@ namespace CommandCenter.ViewModel
         public void OnActivated()
         {
             RefreshTargets();
+            RebuildTransferOptions();
 
             if (!_initialized)
             {
@@ -763,6 +1099,18 @@ namespace CommandCenter.ViewModel
 
         private async Task DownloadSelectedAsync()
         {
+            if (UseTransfer)
+            {
+                await TransferBuildAsync();
+                return;
+            }
+
+            if (UseLocalFiles)
+            {
+                await ExtractLocalFilesAsync(LocalFiles.ToList());
+                return;
+            }
+
             if (IsBatchMode)
             {
                 await DownloadBatchAsync(_batch.ToList());
@@ -776,7 +1124,7 @@ namespace CommandCenter.ViewModel
             var buildVm = _findBuildSection(target.Id);
             if (buildVm?.IsBusy == true)
             {
-                MessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
+                ScrollableMessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
                     "Build Repo", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -817,7 +1165,7 @@ namespace CommandCenter.ViewModel
                 var archiveNames = files.Select(f => f.RelativePath).Where(BuildRepoDefaults.IsArchive).ToList();
                 if (extract && archiveNames.Count == 0)
                 {
-                    var answer = MessageBox.Show(
+                    var answer = ScrollableMessageBox.Show(
                         $"None of the {files.Count} file(s) in {node.Name} are .zip/.7z archives, so there's nothing to extract.\n\nDownload them into {target.Title}'s build folder instead?",
                         "Build Repo", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (answer != MessageBoxResult.Yes)
@@ -863,7 +1211,7 @@ namespace CommandCenter.ViewModel
                 }
                 else
                 {
-                    confirmText = $"Download {files.Count} file(s) from {node.Name} into {target.Title}'s Current Build directory:\n{buildPath}\n\nExisting files with the same names will be overwritten.\n\nContinue?";
+                    confirmText = $"Download {files.Count} file(s) from {node.Name} for {target.Title}.\n\nExisting files with the same names will be overwritten.\n\nContinue?";
                 }
 
                 var versionLabel = VersionLabelFor(node);
@@ -873,33 +1221,48 @@ namespace CommandCenter.ViewModel
                         $"\n\n{target.Title}'s Version Number will be set to {versionLabel} once it finishes.\n\nContinue?");
                 }
 
-                if (MessageBox.Show(confirmText, extract && hasFull ? "Confirm Download & New Build" : patchOnly ? "Confirm Download & Patch" : "Confirm Download",
+                // Zips/7z ALWAYS land in BuildRepoDownloads; only extracted files go into the Current Build directory.
+                stagingRoot = StagingFolderFor(target, node.Name);
+                bool UsesStaging(string relative) => extract || BuildRepoDefaults.IsArchive(relative);
+                confirmText = confirmText.Replace("\n\nContinue?",
+                    "\n\n" + LocationsText(stagingRoot, buildPath, extract,
+                        files.Any(f => UsesStaging(f.RelativePath)), files.Any(f => !UsesStaging(f.RelativePath))) + "\n\nContinue?");
+
+                if (ScrollableMessageBox.Show(confirmText, extract && hasFull ? "Confirm Download & New Build" : patchOnly ? "Confirm Download & Patch" : "Confirm Download",
                         MessageBoxButton.YesNo, extract && hasFull ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
                 {
                     StatusText = "Download cancelled.";
                     return;
                 }
 
-                // 4. Download everything, one file at a time.
-                var downloadRoot = extract ? (stagingRoot = StagingFolderFor(target, node.Name)) : buildPath;
-                if (extract && Directory.Exists(stagingRoot!))
-                {
-                    TryDeleteDirectory(stagingRoot!); // stale leftovers from an earlier failed run
-                }
-                Directory.CreateDirectory(downloadRoot);
-                Log($"Downloading to: {downloadRoot}");
+                // 4. Download everything, one file at a time. Archives (and everything, in extract
+                //    modes) go to BuildRepoDownloads; anything a previous failed run already finished
+                //    there is verified and reused instead of being downloaded again.
+                var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var plan = files.Select(f => (f.Item, f.RelativePath,
+                        Destination: UniquePath(Path.Combine(UsesStaging(f.RelativePath) ? stagingRoot : buildPath, f.RelativePath), usedPaths),
+                        Staged: UsesStaging(f.RelativePath)))
+                    .ToList();
+                PrepareStagingFolder(stagingRoot, plan.Where(p => p.Staged).Select(p => p.Destination));
+                if (plan.Any(p => p.Staged)) Log($"Zip/7z downloads go to: {stagingRoot}");
+                if (plan.Any(p => !p.Staged)) Log($"Other files go to: {buildPath}");
 
                 var downloadBand = extract ? 60.0 : 100.0;
                 var downloaded = new List<string>();
-                var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 IsProgressIndeterminate = false;
                 downloading = true;
 
-                for (int i = 0; i < files.Count; i++)
+                for (int i = 0; i < plan.Count; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    var (item, relative) = files[i];
-                    var destination = UniquePath(Path.Combine(downloadRoot, relative), usedPaths);
+                    var (item, relative, destination, staged) = plan[i];
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    if (staged && TryReuseVerifiedDownload(destination, relative))
+                    {
+                        downloaded.Add(destination);
+                        ProgressPercent = (i + 1.0) / plan.Count * downloadBand;
+                        continue;
+                    }
                     int index = i; // captured by the Progress callback below (posted async - the loop variable may have moved on)
                     int fileNumber = i + 1;
                     var name = Path.GetFileName(destination);
@@ -926,7 +1289,9 @@ namespace CommandCenter.ViewModel
 
                 if (!extract)
                 {
-                    StatusText = $"Downloaded {downloaded.Count} file(s) from {node.Name} into {target.Title}'s build folder.";
+                    StatusText = plan.Any(p => p.Staged)
+                        ? $"Downloaded {downloaded.Count} file(s) from {node.Name}. Zip/7z files are in {stagingRoot} (not extracted)."
+                        : $"Downloaded {downloaded.Count} file(s) from {node.Name} into {target.Title}'s build folder.";
                     Log("Done.");
                     return;
                 }
@@ -1028,7 +1393,7 @@ namespace CommandCenter.ViewModel
             }
             catch (SignInRequiredException)
             {
-                if (downloading) ResetAfterFailedDownload(stagingRoot);
+                if (downloading) KeepCompletedDownloads(stagingRoot);
                 NeedsSignIn = true;
                 StatusText = "Google sign-in required - sign in, then try the download again.";
                 Log("Stopped: Google sign-in required.");
@@ -1051,12 +1416,12 @@ namespace CommandCenter.ViewModel
                 Log($"Failed: {ex.Message}");
                 if (downloading)
                 {
-                    // Couldn't resume (or something else broke mid-download): nothing half-written is
-                    // kept, so the next click starts clean.
-                    ResetAfterFailedDownload(stagingRoot);
-                    StatusText = $"Failed: {ex.Message} Partial download removed - click {DownloadButtonText} to start over.";
-                    MessageBox.Show($"{ex.Message}\n\nThis download couldn't be resumed, so the partial files were removed. Click {DownloadButtonText} to start over.",
-                        "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                    // Couldn't resume (or something else broke mid-download): the half-written file is
+                    // gone, but every file that FINISHED stays in BuildRepoDownloads. The next click
+                    // verifies those, skips them, and carries on from the file that failed.
+                    KeepCompletedDownloads(stagingRoot);
+                    StatusText = $"Failed: {ex.Message} Completed files kept - click {DownloadButtonText} to verify them and continue.";
+                    ScrollableMessageBox.Show(DownloadFailedText(ex.Message, stagingRoot), "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 else
                 {
@@ -1065,8 +1430,223 @@ namespace CommandCenter.ViewModel
                     {
                         Log($"Downloaded files are still in: {stagingRoot}");
                     }
-                    MessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ScrollableMessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
+            }
+            finally
+            {
+                if (externalUpdateStarted)
+                {
+                    buildVm?.EndExternalUpdate(StatusText, succeeded: false);
+                }
+                End();
+            }
+        }
+
+        // Transfer Build: move one build tab's whole content into another, exactly like a tab-sourced
+        // Pushed to Live (BuildSectionViewModel.TransferFromTabAsync does the work on the Target's
+        // own view model, so Documents/Version/Executables/"Last version moved to" all behave the same).
+        private async Task TransferBuildAsync()
+        {
+            var source = TransferSource;
+            var target = TransferTarget;
+            if (source == null || target == null || !CanTransfer) return;
+
+            var targetVm = _findBuildSection(target.Id);
+            var sourceVm = _findBuildSection(source.Id);
+            if (targetVm == null)
+            {
+                ScrollableMessageBox.Show($"Couldn't find the {target.Title} tab. Reopen this tab and try again.",
+                    "Build Repo", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            if (targetVm.IsBusy || sourceVm?.IsBusy == true)
+            {
+                var busy = targetVm.IsBusy ? target.Title : source.Title;
+                ScrollableMessageBox.Show($"The {busy} tab is busy with another update right now. Try again once it finishes.",
+                    "Build Repo", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var confirm = ScrollableMessageBox.Show(
+                $"This will move everything from:\n{source.Title} ({source.BuildPath})\n\ninto:\n{target.Title} ({target.BuildPath})\n\n" +
+                $"{target.Title}'s build folder is CLEARED first, then the build files and Documents are moved over.\n" +
+                $"{target.Title}'s Version Number will be set to {source.VersionText}.\n" +
+                $"{source.Title} will be left empty (Version Number cleared, last version shown as {source.VersionText}).\n\n" +
+                "This can't be undone. Continue?",
+                "Confirm Transfer Build", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes)
+            {
+                StatusText = "Transfer cancelled.";
+                return;
+            }
+
+            var started = false;
+            var ct = Begin($"Transferring {source.Title} -> {target.Title}...", indeterminate: false);
+            ClearLog();
+            Log($"Transfer Build: {source.Title} ({source.BuildPath}) -> {target.Title} ({target.BuildPath})");
+            Log($"Version carried over: {source.VersionText}");
+
+            try
+            {
+                var startText = $"Build Repo: transferring in from {source.Title}...";
+                targetVm.BeginExternalUpdate(startText);
+                sourceVm?.BeginExternalUpdate($"Build Repo: transferring out to {target.Title}...");
+                started = true;
+
+                var progress = new Progress<UpdateProgress>(p =>
+                {
+                    ProgressPercent = p.PercentComplete;
+                    StatusText = p.Status;
+                    targetVm.ReportExternalProgress(p.PercentComplete, p.Status);
+                    sourceVm?.ReportExternalProgress(p.PercentComplete, p.Status);
+                });
+
+                var note = await targetVm.TransferFromTabAsync(source.Settings, sourceVm, progress, ct);
+
+                ProgressPercent = 100;
+                var doneText = $"{source.Title} transferred to {target.Title} ({target.Settings.VersionNumber}).{note}";
+                StatusText = doneText;
+                Log("Done." + note);
+                targetVm.EndExternalUpdate(doneText, succeeded: true);
+                sourceVm?.EndExternalUpdate($"Build moved to {target.Title}.", succeeded: true);
+                started = false;
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = "Transfer cancelled - some files may already have moved. Check both build folders.";
+                Log("Cancelled.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed: {ex.Message}");
+                StatusText = $"Transfer failed: {ex.Message}";
+                ScrollableMessageBox.Show(ex.Message, "Transfer Build Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                if (started)
+                {
+                    targetVm.EndExternalUpdate(StatusText, succeeded: false);
+                    sourceVm?.EndExternalUpdate(StatusText, succeeded: false);
+                }
+                End();
+                // Re-read versions/paths so the dropdown labels show the new state.
+                RebuildTransferOptions();
+            }
+        }
+
+        // Local Files: no Drive at all - each listed .zip/.7z runs through BuildUpdateService.RunAsync
+        // straight from where it sits on disk, in list order. The first one is a New Build when
+        // "Start with a New Build" is ticked; every other file is a Patch onto the same build folder
+        // (same chaining as the build tabs' "additional files to apply" list). Source files are never
+        // moved or deleted.
+        private async Task ExtractLocalFilesAsync(List<LocalExtractFileViewModel> files)
+        {
+            var target = SelectedTarget;
+            if (files.Count == 0 || target == null || !target.HasBuildPath) return;
+
+            var missing = files.Where(f => !File.Exists(f.FullPath)).ToList();
+            if (missing.Count > 0)
+            {
+                ScrollableMessageBox.Show("These files can't be found anymore - remove them from the list and try again:\n\n" +
+                    string.Join("\n", missing.Select(f => f.FullPath)), "Build Repo", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            var buildVm = _findBuildSection(target.Id);
+            if (buildVm?.IsBusy == true)
+            {
+                ScrollableMessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
+                    "Build Repo", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var buildPath = target.BuildPath;
+            var newBuildFirst = LocalNewBuildFirst;
+            var plan = files.Select((f, i) => (f.FullPath, Mode: i == 0 && newBuildFirst ? UpdateMode.NewBuild : UpdateMode.Patch)).ToList();
+
+            var lines = string.Join("\n", plan.Select((p, i) =>
+                $"{i + 1}. {(p.Mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetFileName(p.FullPath)}"));
+            var confirmText = newBuildFirst
+                ? $"Extract {plan.Count} local file(s) and REPLACE the existing {target.Title} build at:\n{buildPath}\n\n{lines}\n\n" +
+                  "The build folder is DELETED before file 1 is extracted. Everything after it is applied on top like Patch.\n\nContinue?"
+                : $"Extract {plan.Count} local file(s) as a PATCH on top of the existing {target.Title} build at:\n{buildPath}\n\n{lines}\n\n" +
+                  "Existing files are kept - only files with the same names are overwritten.\n\nContinue?";
+
+            var versionLabel = string.IsNullOrWhiteSpace(LocalVersionNumber) ? null : LocalVersionNumber.Trim();
+            if (versionLabel != null)
+            {
+                confirmText = confirmText.Replace("\n\nContinue?",
+                    $"\n\n{target.Title}'s Version Number will be set to {versionLabel} once it finishes.\n\nContinue?");
+            }
+
+            if (ScrollableMessageBox.Show(confirmText, newBuildFirst ? "Confirm Local New Build" : "Confirm Local Patch",
+                    MessageBoxButton.YesNo, newBuildFirst ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
+            {
+                StatusText = "Extract cancelled.";
+                return;
+            }
+
+            var externalUpdateStarted = false;
+            var ct = Begin($"Extracting {plan.Count} local file(s)...", indeterminate: false);
+            ClearLog();
+            Log($"Local files ({plan.Count}), applied in this order:");
+            foreach (var (path, mode) in plan) Log($"  {(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {path}");
+            Log($"Target tab: {target.Title}  ({buildPath})");
+
+            try
+            {
+                buildVm?.BeginExternalUpdate($"Build Repo: extracting {plan.Count} local file(s)...");
+                externalUpdateStarted = true;
+
+                for (int i = 0; i < plan.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (path, mode) = plan[i];
+                    int index = i;
+                    int fileNumber = i + 1;
+                    var label = $"{(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetFileName(path)}";
+                    Log($"File {fileNumber} of {plan.Count} - {label}");
+
+                    var progress = new Progress<UpdateProgress>(p =>
+                    {
+                        var pct = (index + p.PercentComplete / 100.0) / plan.Count * 100.0;
+                        var text = $"File {fileNumber} of {plan.Count} ({label}): {p.Status}";
+                        ProgressPercent = pct;
+                        StatusText = text;
+                        buildVm?.ReportExternalProgress(pct, text);
+                    });
+
+                    await BuildUpdateService.RunAsync(path, buildPath, mode, progress, ct);
+                    Log("  ✓ done");
+                }
+
+                RescanExecutables(target.Settings);
+                if (versionLabel != null)
+                {
+                    target.Settings.VersionNumber = versionLabel;
+                    Log($"Set {target.Title}'s Version Number to {versionLabel}.");
+                }
+                TrySaveSettings();
+
+                ProgressPercent = 100;
+                var doneText = $"{plan.Count} local file(s) {(newBuildFirst ? "extracted into" : "patched into")} {target.Title}. Ready to launch.";
+                StatusText = doneText;
+                Log("Done. Source files were left where they are.");
+                buildVm?.EndExternalUpdate(doneText, succeeded: true);
+                externalUpdateStarted = false;
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = "Extract cancelled.";
+                Log("Cancelled.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed: {ex.Message}");
+                StatusText = $"Failed: {ex.Message}";
+                ScrollableMessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
@@ -1092,7 +1672,7 @@ namespace CommandCenter.ViewModel
             var build = nodes[0].BuildAncestor;
             if (build == null || nodes.Any(n => n.DriveId == null || !ReferenceEquals(n.BuildAncestor, build)))
             {
-                MessageBox.Show("Batched folders all have to come from the same build.", "Build Repo",
+                ScrollableMessageBox.Show("Batched folders all have to come from the same build.", "Build Repo",
                     MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -1100,7 +1680,7 @@ namespace CommandCenter.ViewModel
             var buildVm = _findBuildSection(target.Id);
             if (buildVm?.IsBusy == true)
             {
-                MessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
+                ScrollableMessageBox.Show($"The {target.Title} tab is busy with another update right now. Try again once it finishes.",
                     "Build Repo", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
@@ -1146,7 +1726,7 @@ namespace CommandCenter.ViewModel
                 var allRelative = groups.SelectMany(g => g.Files.Select(f => f.RelativePath)).ToList();
                 if (extract && !allRelative.Any(BuildRepoDefaults.IsArchive))
                 {
-                    var answer = MessageBox.Show(
+                    var answer = ScrollableMessageBox.Show(
                         $"None of the {totalFiles} file(s) in the selected folders are .zip/.7z archives, so there's nothing to extract.\n\nDownload them into {target.Title}'s build folder instead?",
                         "Build Repo", MessageBoxButton.YesNo, MessageBoxImage.Question);
                     if (answer != MessageBoxResult.Yes)
@@ -1167,19 +1747,19 @@ namespace CommandCenter.ViewModel
                 string confirmText;
                 if (!extract)
                 {
-                    confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name} into {target.Title}'s Current Build directory, in this order:\n{orderText}\n\n{buildPath}\n\n" +
+                    confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name} for {target.Title}, in this order:\n\n{orderText}\n\n" +
                                   "Later folders overwrite files with the same names from earlier ones.\n\nContinue?";
                 }
                 else if (hasFull)
                 {
                     confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name}, then REPLACE the existing {target.Title} build at:\n{buildPath}\n\n" +
-                                  "The Full archive is applied like New Build (the current build is wiped), then everything else is applied like Patch in this order:\n" +
+                                  "The Full archive is applied like New Build (the current build is wiped), then everything else is applied like Patch in this order:\n\n" +
                                   $"{orderText}\n\nContinue?";
                 }
                 else
                 {
                     confirmText = $"Download {groups.Count} folders ({totalFiles} file(s)) from {build.Name} and PATCH the existing {target.Title} build at:\n{buildPath}\n\n" +
-                                  $"Each folder is applied like the Patch button (Full included - overlaid, not wiped), one after another, in this order:\n{orderText}\n\n" +
+                                  $"Each folder is applied like the Patch button (Full included - overlaid, not wiped), one after another, in this order:\n\n{orderText}\n\n" +
                                   "The current build is kept - later folders overwrite files with the same names.\n\nContinue?";
                 }
 
@@ -1190,22 +1770,39 @@ namespace CommandCenter.ViewModel
                         $"\n\n{target.Title}'s Version Number will be set to {versionLabel} once it finishes.\n\nContinue?");
                 }
 
-                if (MessageBox.Show(confirmText, hasFull ? "Confirm Batch Download & New Build" : extract ? "Confirm Batch Download & Patch" : "Confirm Batch Download",
+                // Zips/7z ALWAYS land in BuildRepoDownloads; only extracted files go into the Current Build directory.
+                stagingRoot = StagingFolderFor(target, $"{build.Name} batch");
+                bool UsesStaging(string relative) => extract || BuildRepoDefaults.IsArchive(relative);
+                confirmText = confirmText.Replace("\n\nContinue?",
+                    "\n\n" + LocationsText(stagingRoot, buildPath, extract,
+                        allRelative.Any(UsesStaging), allRelative.Any(r => !UsesStaging(r))) + "\n\nContinue?");
+
+                if (ScrollableMessageBox.Show(confirmText, hasFull ? "Confirm Batch Download & New Build" : extract ? "Confirm Batch Download & Patch" : "Confirm Batch Download",
                         MessageBoxButton.YesNo, hasFull ? MessageBoxImage.Warning : MessageBoxImage.Question) != MessageBoxResult.Yes)
                 {
                     StatusText = "Download cancelled.";
                     return;
                 }
 
-                // 4. Download everything - each Partial into its own folder ("01 Partial", "02 Partial 1 10_28", ...).
-                if (extract)
+                // 4. Download everything - each Partial into its own BuildRepoDownloads folder ("01 Partial",
+                //    "02 Partial 1 10_28", ...). Anything a previous failed run already finished there is
+                //    verified and reused instead of being downloaded again.
+                var groupRoots = groups.Select((grp, g) =>
+                    Path.Combine(stagingRoot, $"{g + 1:00} {BuildRepoDefaults.MakeSafeFileName(grp.Node.Name)}")).ToList();
+                var groupPlans = new List<List<(DriveItem Item, string RelativePath, string Destination, bool Staged)>>();
+                for (int g = 0; g < groups.Count; g++)
                 {
-                    stagingRoot = StagingFolderFor(target, $"{build.Name} batch");
-                    if (Directory.Exists(stagingRoot)) TryDeleteDirectory(stagingRoot); // stale leftovers
+                    var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    groupPlans.Add(groups[g].Files.Select(f => UsesStaging(f.RelativePath)
+                            ? (f.Item, f.RelativePath, UniquePath(Path.Combine(groupRoots[g], f.RelativePath), used), true)
+                            : (f.Item, f.RelativePath, Path.Combine(buildPath, f.RelativePath), false)) // later folders overwrite earlier ones
+                        .ToList());
                 }
+                PrepareStagingFolder(stagingRoot, groupPlans.SelectMany(p => p).Where(p => p.Staged).Select(p => p.Destination));
+                if (allRelative.Any(UsesStaging)) Log($"Zip/7z downloads go to: {stagingRoot}");
+                if (allRelative.Any(r => !UsesStaging(r))) Log($"Other files go to: {buildPath}");
 
                 var downloadBand = extract ? 60.0 : 100.0;
-                var groupRoots = new List<string>();
                 var groupDownloads = new List<List<string>>();
                 IsProgressIndeterminate = false;
                 downloading = true;
@@ -1213,20 +1810,21 @@ namespace CommandCenter.ViewModel
 
                 for (int g = 0; g < groups.Count; g++)
                 {
-                    var (node, files) = groups[g];
-                    var groupRoot = extract
-                        ? Path.Combine(stagingRoot!, $"{g + 1:00} {BuildRepoDefaults.MakeSafeFileName(node.Name)}")
-                        : buildPath;
-                    Directory.CreateDirectory(groupRoot);
-                    groupRoots.Add(groupRoot);
-                    Log($"Downloading {node.Name} to: {groupRoot}");
+                    var node = groups[g].Node;
+                    Log($"Downloading {node.Name}...");
 
                     var downloaded = new List<string>();
-                    var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var (item, relative) in files)
+                    foreach (var (item, relative, destination, staged) in groupPlans[g])
                     {
                         ct.ThrowIfCancellationRequested();
-                        var destination = UniquePath(Path.Combine(groupRoot, relative), usedPaths);
+                        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                        if (staged && TryReuseVerifiedDownload(destination, $"{node.Name}{Path.DirectorySeparatorChar}{relative}"))
+                        {
+                            downloaded.Add(destination);
+                            fileIndex++;
+                            ProgressPercent = (double)fileIndex / totalFiles * downloadBand;
+                            continue;
+                        }
                         int index = fileIndex++;
                         int fileNumber = index + 1;
                         var name = Path.GetFileName(destination);
@@ -1256,7 +1854,9 @@ namespace CommandCenter.ViewModel
 
                 if (!extract)
                 {
-                    StatusText = $"Downloaded {groups.Count} folders ({totalFiles} file(s)) from {build.Name} into {target.Title}'s build folder.";
+                    StatusText = allRelative.Any(UsesStaging)
+                        ? $"Downloaded {groups.Count} folders ({totalFiles} file(s)) from {build.Name}. Zip/7z files are in {stagingRoot} (not extracted)."
+                        : $"Downloaded {groups.Count} folders ({totalFiles} file(s)) from {build.Name} into {target.Title}'s build folder.";
                     Log("Done.");
                     return;
                 }
@@ -1361,7 +1961,7 @@ namespace CommandCenter.ViewModel
             }
             catch (SignInRequiredException)
             {
-                if (downloading) ResetAfterFailedDownload(stagingRoot);
+                if (downloading) KeepCompletedDownloads(stagingRoot);
                 NeedsSignIn = true;
                 StatusText = "Google sign-in required - sign in, then try the download again.";
                 Log("Stopped: Google sign-in required.");
@@ -1384,10 +1984,9 @@ namespace CommandCenter.ViewModel
                 Log($"Failed: {ex.Message}");
                 if (downloading)
                 {
-                    ResetAfterFailedDownload(stagingRoot);
-                    StatusText = $"Failed: {ex.Message} Partial download removed - click {DownloadButtonText} to start over.";
-                    MessageBox.Show($"{ex.Message}\n\nThis download couldn't be resumed, so the partial files were removed. Click {DownloadButtonText} to start over.",
-                        "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                    KeepCompletedDownloads(stagingRoot);
+                    StatusText = $"Failed: {ex.Message} Completed files kept - click {DownloadButtonText} to verify them and continue.";
+                    ScrollableMessageBox.Show(DownloadFailedText(ex.Message, stagingRoot), "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
                 else
                 {
@@ -1396,7 +1995,7 @@ namespace CommandCenter.ViewModel
                     {
                         Log($"Downloaded files are still in: {stagingRoot}");
                     }
-                    MessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+                    ScrollableMessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
             }
             finally
@@ -1484,9 +2083,9 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        // A download that failed/was discarded mid-way: delete the staging folder (extract modes -
-        // it only ever holds this run's downloads; Download-only mode writes straight into the build
-        // folder, where completed files are fine and the partial is already gone) and zero the bar.
+        // A download the user CANCELLED/discarded mid-way: delete its BuildRepoDownloads folder (it only
+        // holds this run's downloads; non-archive files written straight into the build folder in
+        // Download-only mode are complete and stay) and zero the bar. Errors use KeepCompletedDownloads instead.
         private void ResetAfterFailedDownload(string? stagingRoot)
         {
             if (stagingRoot != null && Directory.Exists(stagingRoot))
@@ -1500,6 +2099,141 @@ namespace CommandCenter.ViewModel
                 Log("Partial download removed.");
             }
             ProgressPercent = 0;
+        }
+
+        // A download that ERRORED (dropped connection that couldn't resume, sign-in expired...): keep every
+        // file that finished. DownloadLargeFileAsync only moves a file into place once it's complete, so
+        // what's left in BuildRepoDownloads is whole; the next click verifies it and continues.
+        private void KeepCompletedDownloads(string? stagingRoot)
+        {
+            if (stagingRoot != null && Directory.Exists(stagingRoot))
+            {
+                var kept = Directory.EnumerateFiles(stagingRoot, "*", SearchOption.AllDirectories)
+                    .Count(f => !f.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
+                Log($"Kept {kept} completed file(s) in: {stagingRoot}");
+                Log($"Click {DownloadButtonText} again to verify them and continue from where it stopped.");
+            }
+            ProgressPercent = 0;
+        }
+
+        private string DownloadFailedText(string error, string? stagingRoot) =>
+            $"{error}\n\nFiles that finished downloading were kept in:\n{stagingRoot}\n\n" +
+            $"Click {DownloadButtonText} again - those files are verified and skipped, and the download continues from the file that failed.";
+
+        // Confirmation-dialog lines showing where things land.
+        private static string LocationsText(string stagingRoot, string buildPath, bool extract, bool anyStaged, bool anyDirect)
+        {
+            var sb = new StringBuilder();
+            if (anyStaged)
+            {
+                sb.Append(extract ? "Zip/7z downloads land in:\n" : "Zip/7z downloads land in (kept there, NOT extracted - Extract after download is off):\n")
+                  .Append(stagingRoot);
+            }
+            if (extract)
+            {
+                if (sb.Length > 0) sb.Append("\n\n");
+                sb.Append("Extracted into the Current Build directory:\n").Append(buildPath);
+            }
+            else if (anyDirect)
+            {
+                if (sb.Length > 0) sb.Append("\n\n");
+                sb.Append("Other (non-archive) files go to the Current Build directory:\n").Append(buildPath);
+            }
+            return sb.ToString();
+        }
+
+        // Before downloading into BuildRepoDownloads: throw away half-written .part files and anything
+        // that isn't part of THIS download (so stray archives from another run can't be applied), but
+        // keep every completed file that is - TryReuseVerifiedDownload checks each one before it's skipped.
+        private void PrepareStagingFolder(string stagingRoot, IEnumerable<string> expectedPaths)
+        {
+            if (!Directory.Exists(stagingRoot)) return;
+            var expected = new HashSet<string>(expectedPaths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+            int removed = 0, existing = 0;
+
+            foreach (var file in Directory.EnumerateFiles(stagingRoot, "*", SearchOption.AllDirectories).ToList())
+            {
+                if (!file.EndsWith(".part", StringComparison.OrdinalIgnoreCase) && expected.Contains(Path.GetFullPath(file)))
+                {
+                    existing++;
+                    continue;
+                }
+                try { File.Delete(file); removed++; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+
+            foreach (var dir in Directory.EnumerateDirectories(stagingRoot, "*", SearchOption.AllDirectories)
+                         .OrderByDescending(d => d.Length).ToList())
+            {
+                try { if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+
+            if (existing > 0) Log($"Found {existing} file(s) from an earlier attempt in {stagingRoot} - verifying before reuse.");
+            if (removed > 0) Log($"Removed {removed} leftover/partial file(s) from {stagingRoot}.");
+        }
+
+        // True if destination already holds a complete download from an earlier attempt.
+        private bool TryReuseVerifiedDownload(string destination, string label)
+        {
+            if (!File.Exists(destination)) return false;
+            if (IsVerifiedDownload(destination, out var why))
+            {
+                Log($"  ✓ {label}  ({FormatBytes(new FileInfo(destination).Length)}) - already downloaded, verified, skipped");
+                return true;
+            }
+
+            Log($"  ! {label}: existing copy failed verification ({why}) - downloading again.");
+            try { File.Delete(destination); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            return false;
+        }
+
+        // Cheap integrity check: non-empty, and for archives the structure has to be readable all the
+        // way to the end (zip central directory / 7z header), which a truncated file fails.
+        private static bool IsVerifiedDownload(string path, out string reason)
+        {
+            reason = string.Empty;
+            try
+            {
+                var info = new FileInfo(path);
+                if (info.Length == 0) { reason = "empty file"; return false; }
+
+                var ext = Path.GetExtension(path);
+                if (ext.Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var zip = System.IO.Compression.ZipFile.OpenRead(path);
+                    _ = zip.Entries.Count;
+                    return true;
+                }
+
+                if (ext.Equals(".7z", StringComparison.OrdinalIgnoreCase))
+                {
+                    using var fs = File.OpenRead(path);
+                    var header = new byte[32];
+                    if (fs.Read(header, 0, 32) < 32) { reason = "truncated header"; return false; }
+                    byte[] sig = { 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C };
+                    for (int i = 0; i < sig.Length; i++)
+                    {
+                        if (header[i] != sig[i]) { reason = "not a 7z file"; return false; }
+                    }
+                    var nextHeaderOffset = BitConverter.ToInt64(header, 12);
+                    var nextHeaderSize = BitConverter.ToInt64(header, 20);
+                    if (nextHeaderOffset < 0 || nextHeaderSize < 0 || 32 + nextHeaderOffset + nextHeaderSize > info.Length)
+                    {
+                        reason = "file is cut short";
+                        return false;
+                    }
+                    return true;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                reason = ex.Message;
+                return false;
+            }
         }
 
         // Recursively lists a Drive folder into (file, relative path) pairs, mirroring its structure.
@@ -1556,12 +2290,22 @@ namespace CommandCenter.ViewModel
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
         }
 
-        // <parent of build folder>\_BuildRepoDownloads\<tab title>\<selected node name>
+        // <parent of build folder>\BuildRepoDownloads\<tab title>\<selected node name>
         private static string StagingFolderFor(BuildRepoTargetOption target, string nodeName)
         {
             var trimmed = target.BuildPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             var parent = Path.GetDirectoryName(trimmed);
             var baseDir = string.IsNullOrEmpty(parent) ? Path.GetPathRoot(target.BuildPath)! : parent;
+
+            // One-time move of the old "_BuildRepoDownloads" folder to the new name, so earlier downloads aren't orphaned.
+            try
+            {
+                var legacy = Path.Combine(baseDir, BuildRepoDefaults.LegacyStagingFolderName);
+                var current = Path.Combine(baseDir, BuildRepoDefaults.StagingFolderName);
+                if (Directory.Exists(legacy) && !Directory.Exists(current)) Directory.Move(legacy, current);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+
             return Path.Combine(baseDir, BuildRepoDefaults.StagingFolderName,
                 BuildRepoDefaults.MakeSafeFileName(target.Title), BuildRepoDefaults.MakeSafeFileName(nodeName));
         }

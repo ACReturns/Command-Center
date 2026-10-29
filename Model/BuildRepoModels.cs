@@ -19,11 +19,14 @@ namespace CommandCenter.Model
         public const string BuildFolderName = "Build";
 
         /// <summary>
-        /// Name of the staging folder used when "Extract after download" is on. It sits NEXT TO the
+        /// Name of the staging folder every downloaded .zip/.7z lands in (and every file, when "Extract after download" is on). It sits NEXT TO the
         /// target tab's build folder (same drive, so no cross-drive copy), never inside it - a Full_*.zip
         /// runs as a New Build, which wipes the build folder first and would delete the downloads.
         /// </summary>
-        public const string StagingFolderName = "_BuildRepoDownloads";
+        public const string StagingFolderName = "BuildRepoDownloads";
+
+        /// <summary>Pre-rename name of the staging folder; moved to <see cref="StagingFolderName"/> on first use.</summary>
+        public const string LegacyStagingFolderName = "_BuildRepoDownloads";
 
         private static readonly string[] ArchiveExtensions = { ".zip", ".7z" };
 
