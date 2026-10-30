@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -43,6 +44,12 @@ namespace CommandCenter.Services
     /// </summary>
     public sealed class DriveDownloadInterruptedException : IOException
     {
+        /// <summary>
+        /// Reason used when Resume was asked for but the partial bytes are no longer on disk (deleted,
+        /// cleaned up, folder moved...). Nothing to continue from - the caller should restart that file.
+        /// </summary>
+        public const string PartialFileMissingReason = "PartialFileMissing";
+
         public DriveDownloadInterruptedException(string reason, ResumableDriveDownload? resumable)
             : base($"Download interrupted - {GoogleWebSession.DescribeInterruptReason(reason)}")
         {
@@ -68,6 +75,7 @@ namespace CommandCenter.Services
         private readonly string _destinationPath;
         private IProgress<DriveDownloadProgress>? _progress;
         private TaskCompletionSource<bool> _done = NewDone();
+        private CoreWebView2? _web;
         private bool _closed;
 
         internal ResumableDriveDownload(CoreWebView2Controller controller, CoreWebView2DownloadOperation operation,
@@ -80,6 +88,54 @@ namespace CommandCenter.Services
             _progress = progress;
             _operation.BytesReceivedChanged += OnBytesReceivedChanged;
             _operation.StateChanged += OnStateChanged;
+        }
+
+        /// <summary>
+        /// Takes over the hidden browser's DownloadStarting event once DownloadLargeFileAsync hands the
+        /// paused download to the caller. On Resume, Chromium re-runs its "where should this file go?"
+        /// step - with nobody answering it, WebView2 fell back to the Save As dialog, and cancelling
+        /// that dialog cancelled the whole download. Answering it here with the original .part path
+        /// keeps resume fully automatic.
+        /// </summary>
+        internal void TakeOverDownloadStarting()
+        {
+            if (_closed || _web != null) return;
+            try
+            {
+                _web = _controller.CoreWebView2;
+                _web.DownloadStarting += OnResumeDownloadStarting;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+            {
+                _web = null;
+            }
+        }
+
+        private void OnResumeDownloadStarting(object? sender, CoreWebView2DownloadStartingEventArgs e)
+        {
+            // Same file, same place - never ask the user.
+            e.ResultFilePath = _partPath;
+            e.Handled = true;
+        }
+
+        /// <summary>
+        /// True when some piece of the partial download is still on disk: the .part file itself, or
+        /// Chromium's intermediate .crdownload ("&lt;name&gt;.part.crdownload" or "Unconfirmed NNN.crdownload").
+        /// </summary>
+        public bool PartialFileExists()
+        {
+            try
+            {
+                if (File.Exists(_partPath) || File.Exists(_partPath + ".crdownload")) return true;
+                var dir = Path.GetDirectoryName(_partPath);
+                return dir != null
+                       && Directory.Exists(dir)
+                       && Directory.EnumerateFiles(dir, "Unconfirmed *.crdownload").Any();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         public string FileName => Path.GetFileName(_destinationPath);
@@ -141,6 +197,23 @@ namespace CommandCenter.Services
         {
             if (_closed) throw new ObjectDisposedException(nameof(ResumableDriveDownload));
             if (progress != null) _progress = progress;
+
+            // Verify the bytes we'd be resuming from are still there before touching the browser. If
+            // they're gone there's nothing to continue - report it so the caller restarts the file
+            // instead of Chromium silently starting over (or prompting for a location).
+            if (!PartialFileExists())
+            {
+                // Just cancel + close; no delete sweep, since the caller restarts this file in the same
+                // folder right away and the sweep would race the fresh download's .crdownload.
+                Close(deletePartial: true);
+                throw new DriveDownloadInterruptedException(DriveDownloadInterruptedException.PartialFileMissingReason, null);
+            }
+
+            // Make sure the folder it was saving into still exists, and that Chromium's "where does this
+            // go?" step on resume is answered with the original path instead of a Save As dialog.
+            try { Directory.CreateDirectory(Path.GetDirectoryName(_partPath)!); } catch { }
+            TakeOverDownloadStarting();
+
             _done = NewDone();
 
             try
@@ -187,6 +260,13 @@ namespace CommandCenter.Services
                 _operation.StateChanged -= OnStateChanged;
             }
             catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+
+            if (_web != null)
+            {
+                try { _web.DownloadStarting -= OnResumeDownloadStarting; }
+                catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException) { }
+                _web = null;
+            }
 
             if (deletePartial)
             {
@@ -833,6 +913,10 @@ namespace CommandCenter.Services
                 catch (DriveDownloadInterruptedException ex) when (ex.Resumable != null)
                 {
                     handedOff = true; // caller now owns the paused download (resume or discard)
+                    // The finally below unhooks OUR DownloadStarting handler (which cancels anything
+                    // after the first download). Hand that event to the paused job so a Resume is
+                    // routed back to the same .part file instead of popping a Save As dialog.
+                    ex.Resumable.TakeOverDownloadStarting();
                     throw;
                 }
             }
@@ -914,6 +998,8 @@ namespace CommandCenter.Services
                 "a Windows/Edge policy blocked the file (FileBlockedByPolicy).",
             nameof(CoreWebView2DownloadInterruptReason.FileSecurityCheckFailed) =>
                 "the Windows security scan of the file failed (FileSecurityCheckFailed).",
+            DriveDownloadInterruptedException.PartialFileMissingReason =>
+                "the partially downloaded file is no longer on disk, so there's nothing to resume from.",
             _ => reason
         };
 

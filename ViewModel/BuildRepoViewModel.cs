@@ -2018,9 +2018,11 @@ namespace CommandCenter.ViewModel
             var name = Path.GetFileName(destination);
             ResumableDriveDownload? pending = null;
             string reason;
+            var restartsLeft = 2; // fresh restarts allowed when the partial vanished from disk
 
             try
             {
+            StartFresh:
                 try
                 {
                     await _session.DownloadLargeFileAsync(fileId, destination, progress, ct);
@@ -2055,6 +2057,17 @@ namespace CommandCenter.ViewModel
                     {
                         pending = ex.Resumable; // dropped again - ask again
                         reason = ex.Reason;
+                    }
+                    catch (DriveDownloadInterruptedException ex)
+                        when (ex.Reason == DriveDownloadInterruptedException.PartialFileMissingReason && restartsLeft > 0)
+                    {
+                        // The partial was deleted/cleaned up while paused - nothing to resume from, so
+                        // start this file over on its own instead of failing the whole run.
+                        restartsLeft--;
+                        pending = null; // already discarded by ResumeAsync
+                        Log($"  ! {name}: partial file is gone from disk - restarting this file from the beginning.");
+                        StatusText = $"Restarting {fileNumber} of {fileCount}: {name} (partial file was missing)...";
+                        goto StartFresh;
                     }
                 }
             }
