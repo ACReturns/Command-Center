@@ -90,10 +90,10 @@ namespace CommandCenter.Services
                     Directory.Move(trimmed, Path.Combine(workDir, Path.GetFileName(trimmed)));
 
                     // Same as RunOnBackgroundThreadAsync from here on: workDir == its tempDir.
-                    string contentRoot = FindContentRoot(workDir);
+                    string contentRoot = FindContentRoot(workDir, destinationBuildPath);
                     Directory.CreateDirectory(destinationBuildPath);
 
-                    contentRoot = await ResolvePartialClientPayloadAsync(workDir, contentRoot, progress, cancellationToken).ConfigureAwait(false);
+                    contentRoot = await ResolvePartialClientPayloadAsync(workDir, contentRoot, destinationBuildPath, progress, cancellationToken).ConfigureAwait(false);
 
                     CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
 
@@ -125,6 +125,81 @@ namespace CommandCenter.Services
             && Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories)
                 .Any(f => !string.Equals(Path.GetExtension(f), ".md5", StringComparison.OrdinalIgnoreCase));
 
+        // Same Full/Partial name rules the Build Repo tree uses to tag items "New Build"/"Patch".
+        private static readonly System.Text.RegularExpressions.Regex FullNamePattern =
+            new(@"^\s*Full(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        private static readonly System.Text.RegularExpressions.Regex PartialNamePattern =
+            new(@"^\s*Partial(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        /// <summary>
+        /// Peeks at an archive's entry list (no extraction) and reports whether it's a packaged BUILD
+        /// FOLDER - i.e. it holds a Full_*.zip/.7z, or Full / Partial folders, the same layout the
+        /// Build Repo tree tags as "New Build" / "Patch" on Drive - rather than a plain client payload
+        /// (Full_Client.zip, Partial_Client.zip, a loose patch). Only the first few folder levels are
+        /// checked so a client's own deep subfolders can't trigger it. Runs on a background thread.
+        /// </summary>
+        public static Task<bool> IsBuildLayoutArchiveAsync(string archivePath, CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() =>
+            {
+                using var archive = ArchiveFactory.Open(archivePath);
+                foreach (var entry in archive.Entries)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (string.IsNullOrEmpty(entry.Key)) continue;
+
+                    var segments = entry.Key.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries);
+                    if (segments.Length == 0) continue;
+
+                    // Folder segments (every segment for a directory entry, all but the last for a file).
+                    int folderCount = entry.IsDirectory ? segments.Length : segments.Length - 1;
+                    for (int i = 0; i < Math.Min(folderCount, 4); i++)
+                    {
+                        var name = segments[i].Trim();
+                        if (FullNamePattern.IsMatch(name) || PartialNamePattern.IsMatch(name)) return true;
+                    }
+
+                    if (!entry.IsDirectory && segments.Length <= 5)
+                    {
+                        var fileName = segments[^1];
+                        if (SupportedExtensions.Contains(Path.GetExtension(fileName), StringComparer.OrdinalIgnoreCase)
+                            && (fileName.StartsWith("Full_", StringComparison.OrdinalIgnoreCase)
+                                || fileName.StartsWith("Partial_", StringComparison.OrdinalIgnoreCase)))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }, cancellationToken);
+        }
+
+        /// <summary>
+        /// Plain extraction of an archive into <paramref name="destinationDir"/> (same sanitizing and
+        /// checksums.md5 removal as the normal pipeline), with nothing applied to any build folder.
+        /// Used by the Build Repo tab to unpack a packaged build folder into staging so its Full /
+        /// Partial pieces can be applied the same way a Drive download is.
+        /// </summary>
+        public static Task ExtractToFolderAsync(string archivePath, string destinationDir, IProgress<UpdateProgress> progress, CancellationToken cancellationToken = default)
+        {
+            return Task.Run(async () =>
+            {
+                Directory.CreateDirectory(destinationDir);
+                await ExtractArchiveAsync(archivePath, destinationDir, cancellationToken, (done, total) =>
+                    progress.Report(new UpdateProgress($"Unpacking ({done}/{total})...", done / (double)total * 100))).ConfigureAwait(false);
+            }, cancellationToken);
+        }
+
+        /// <summary>Empties a build folder (creating it if missing) - the wipe New Build does before applying.</summary>
+        public static Task ClearBuildFolderAsync(string buildPath, CancellationToken cancellationToken = default)
+        {
+            return Task.Run(() =>
+            {
+                Directory.CreateDirectory(buildPath);
+                ClearDirectory(buildPath, cancellationToken);
+            }, cancellationToken);
+        }
+
         private static async Task RunOnBackgroundThreadAsync(string sourceArchivePath, string destinationBuildPath, UpdateMode mode, IProgress<UpdateProgress> progress, CancellationToken cancellationToken)
         {
             await Task.Run(async () =>
@@ -137,7 +212,9 @@ namespace CommandCenter.Services
                     progress.Report(new UpdateProgress("Extracting archive...", 5));
                     await ExtractWithProgressAsync(sourceArchivePath, tempDir, progress, cancellationToken).ConfigureAwait(false);
 
-                    string contentRoot = FindContentRoot(tempDir);
+                    // Patch anchors the wrapper-collapse against the existing build folder so a deep,
+                    // single-path patch keeps its folder structure (see FindContentRoot).
+                    string contentRoot = FindContentRoot(tempDir, mode == UpdateMode.Patch ? destinationBuildPath : null);
 
                     Directory.CreateDirectory(destinationBuildPath);
 
@@ -156,7 +233,7 @@ namespace CommandCenter.Services
                         // when the file the user selected already IS Partial_Client.zip/.7z (see
                         // IsPartialClientArchive) - its extracted, already-flattened content is the
                         // payload as-is, so hunting it for another nested Partial_Client would be wrong.
-                        contentRoot = await ResolvePartialClientPayloadAsync(tempDir, contentRoot, progress, cancellationToken).ConfigureAwait(false);
+                        contentRoot = await ResolvePartialClientPayloadAsync(tempDir, contentRoot, destinationBuildPath, progress, cancellationToken).ConfigureAwait(false);
                     }
 
                     CopyDirectoryWithProgress(contentRoot, destinationBuildPath, progress, cancellationToken);
@@ -227,7 +304,20 @@ namespace CommandCenter.Services
         // Collapses redundant single-folder wrappers (e.g. Patch.zip -> Patch\build\... -> the real
         // content) so an extra nesting level a developer accidentally adds to an archive never breaks
         // the transfer - it keeps drilling down until it finds a folder with more than one item in it.
-        private static string FindContentRoot(string dir)
+        //
+        // Patch mode passes destinationBuildPath. A patch usually only touches a few files deep inside
+        // the build (e.g. AdminClient\Bin\Data\Character\Foo\file.wz), so EVERY level of it is a single
+        // folder - left alone, the drill would go all the way down to Foo and dump file.wz loose into
+        // the build root, wrecking the folder structure the client depends on. So with a destination
+        // supplied, the drill still passes straight through the known AdminClient/Bin wrappers (their
+        // contents always belong at the build root - FlattenKnownWrapperFolders does the same thing
+        // after a copy), but stops as soon as the next single folder already exists at the top of
+        // the build folder (e.g. "Data"). That folder is then copied as a folder and merges into the
+        // existing one instead of being unwrapped. A folder that doesn't exist in the build (an
+        // arbitrary "Patch_v271" wrapper) is still treated as a wrapper and drilled through.
+        // NewBuild leaves destinationBuildPath null - the destination is wiped anyway, so there's
+        // nothing to anchor against and the old behavior is kept.
+        private static string FindContentRoot(string dir, string? destinationBuildPath = null)
         {
             string current = dir;
 
@@ -238,6 +328,16 @@ namespace CommandCenter.Services
 
                 if (files.Length == 0 && dirs.Length == 1)
                 {
+                    if (destinationBuildPath != null)
+                    {
+                        string childName = Path.GetFileName(dirs[0]);
+                        bool isKnownWrapper = WrapperFoldersToFlatten.Contains(childName, StringComparer.OrdinalIgnoreCase);
+                        if (!isKnownWrapper && Directory.Exists(Path.Combine(destinationBuildPath, childName)))
+                        {
+                            break;
+                        }
+                    }
+
                     current = dirs[0];
                     continue;
                 }
@@ -594,7 +694,7 @@ namespace CommandCenter.Services
                 $"Found an archive nested inside another archive {maxPasses} levels deep in '{folderPath}' - this looks like a circular or malformed archive rather than a real nested payload. Patch aborted.");
         }
 
-        private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, IProgress<UpdateProgress> progress, CancellationToken cancellationToken, bool allowGenericWrapperFallback = true)
+        private static async Task<string> ResolvePartialClientPayloadAsync(string tempDir, string contentRoot, string destinationBuildPath, IProgress<UpdateProgress> progress, CancellationToken cancellationToken, bool allowGenericWrapperFallback = true)
         {
             string? partialArchivePath = Directory.GetFiles(contentRoot)
                 .FirstOrDefault(f =>
@@ -662,10 +762,10 @@ namespace CommandCenter.Services
                         progress.Report(new UpdateProgress($"Extracting {wrapperArchiveName} ({done}/{total})...", pct));
                     }).ConfigureAwait(false);
 
-                    string wrapperContentRoot = FindContentRoot(wrapperExtractDir);
+                    string wrapperContentRoot = FindContentRoot(wrapperExtractDir, destinationBuildPath);
                     await ExtractNestedArchivesAsync(wrapperContentRoot, progress, cancellationToken).ConfigureAwait(false);
 
-                    return await ResolvePartialClientPayloadAsync(tempDir, wrapperContentRoot, progress, cancellationToken, allowGenericWrapperFallback: false).ConfigureAwait(false);
+                    return await ResolvePartialClientPayloadAsync(tempDir, wrapperContentRoot, destinationBuildPath, progress, cancellationToken, allowGenericWrapperFallback: false).ConfigureAwait(false);
                 }
 
                 if (otherArchives.Count > 1)
@@ -715,7 +815,7 @@ namespace CommandCenter.Services
 
             if (partialFolderPaths.Count == 1)
             {
-                string singleContentRoot = FindContentRoot(partialFolderPaths[0]);
+                string singleContentRoot = FindContentRoot(partialFolderPaths[0], destinationBuildPath);
                 await ExtractNestedArchivesAsync(singleContentRoot, progress, cancellationToken).ConfigureAwait(false);
                 return singleContentRoot;
             }
@@ -735,7 +835,7 @@ namespace CommandCenter.Services
                 foreach (var folderPath in partialFolderPaths)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    string folderContentRoot = FindContentRoot(folderPath);
+                    string folderContentRoot = FindContentRoot(folderPath, destinationBuildPath);
                     // Extract any archive this folder carries in place, before it gets merged in, so
                     // its contents (not the raw zip/7z itself) are what lands in mergedDir below.
                     await ExtractNestedArchivesAsync(folderContentRoot, progress, cancellationToken).ConfigureAwait(false);
@@ -767,7 +867,7 @@ namespace CommandCenter.Services
                 progress.Report(new UpdateProgress($"Extracting Partial_Client archive ({done}/{total})...", pct));
             }).ConfigureAwait(false);
 
-            string extractedContentRoot = FindContentRoot(partialExtractDir);
+            string extractedContentRoot = FindContentRoot(partialExtractDir, destinationBuildPath);
             // Covers the same case as the folder branches above, just for a Partial_Client.zip/.7z
             // that unpacks straight into another archive rather than plain files.
             await ExtractNestedArchivesAsync(extractedContentRoot, progress, cancellationToken).ConfigureAwait(false);

@@ -1539,8 +1539,10 @@ namespace CommandCenter.ViewModel
         // Local Files: no Drive at all - each listed .zip/.7z runs through BuildUpdateService.RunAsync
         // straight from where it sits on disk, in list order. The first one is a New Build when
         // "Start with a New Build" is ticked; every other file is a Patch onto the same build folder
-        // (same chaining as the build tabs' "additional files to apply" list). Source files are never
-        // moved or deleted.
+        // (same chaining as the build tabs' "additional files to apply" list). A file that's a packaged
+        // build folder (Full_*.zip / Full / Partial folders inside) is distributed piece by piece like
+        // a Drive download instead - see ApplyBuildLayoutArchiveAsync. Source files are never moved
+        // or deleted.
         private async Task ExtractLocalFilesAsync(List<LocalExtractFileViewModel> files)
         {
             var target = SelectedTarget;
@@ -1609,16 +1611,26 @@ namespace CommandCenter.ViewModel
                     var label = $"{(mode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetFileName(path)}";
                     Log($"File {fileNumber} of {plan.Count} - {label}");
 
-                    var progress = new Progress<UpdateProgress>(p =>
-                    {
-                        var pct = (index + p.PercentComplete / 100.0) / plan.Count * 100.0;
-                        var text = $"File {fileNumber} of {plan.Count} ({label}): {p.Status}";
-                        ProgressPercent = pct;
-                        StatusText = text;
-                        buildVm?.ReportExternalProgress(pct, text);
-                    });
+                    // start/span = this piece of work's share (0..1) of this file's slice of the bar.
+                    IProgress<UpdateProgress> SliceProgress(string stepLabel, double start, double span) =>
+                        new Progress<UpdateProgress>(p =>
+                        {
+                            var pct = (index + start + span * p.PercentComplete / 100.0) / plan.Count * 100.0;
+                            var text = $"File {fileNumber} of {plan.Count} ({stepLabel}): {p.Status}";
+                            ProgressPercent = pct;
+                            StatusText = text;
+                            buildVm?.ReportExternalProgress(pct, text);
+                        });
 
-                    await BuildUpdateService.RunAsync(path, buildPath, mode, progress, ct);
+                    if (!await BuildUpdateService.IsBuildLayoutArchiveAsync(path, ct))
+                    {
+                        // Plain client payload (Full_Client.zip, Partial_Client.zip, a loose patch) - unchanged.
+                        await BuildUpdateService.RunAsync(path, buildPath, mode, SliceProgress(label, 0, 1), ct);
+                    }
+                    else
+                    {
+                        await ApplyBuildLayoutArchiveAsync(path, target, buildPath, mode, label, SliceProgress, ct);
+                    }
                     Log("  ✓ done");
                 }
 
@@ -1657,6 +1669,115 @@ namespace CommandCenter.ViewModel
                 End();
             }
         }
+
+        // A local archive that's a packaged build FOLDER (Full_*.zip and/or Full / Partial folders
+        // inside - see BuildUpdateService.IsBuildLayoutArchiveAsync) is applied the same way the Drive
+        // download of that folder would be, instead of being dumped into the build folder as-is:
+        //   1. unpacked into BuildRepoDownloads staging (next to the build folder);
+        //   2. Full_* archive(s) applied first - the first one as New Build when this file is tagged
+        //      New Build (a lone archive inside a "Full" folder counts when nothing is named Full_*);
+        //   3. each top-level Partial folder applied as its own Patch, in natural order
+        //      ("Partial", "Partial 2", "Partial 3 10/28"...);
+        //   4. anything else left (Partial_*.zip, a loose Partial Client folder...) patched last.
+        // A New Build-tagged file with no Full archive still wipes the build folder first.
+        // Staging is always deleted afterwards; the source archive is never touched.
+        private async Task ApplyBuildLayoutArchiveAsync(string archivePath, BuildRepoTargetOption target, string buildPath,
+            UpdateMode mode, string label, Func<string, double, double, IProgress<UpdateProgress>> sliceProgress, CancellationToken ct)
+        {
+            const double unpackShare = 0.3;
+            var staging = StagingFolderFor(target, $"Local {Path.GetFileNameWithoutExtension(archivePath)}");
+            TryDeleteDirectory(staging);
+
+            try
+            {
+                Log($"  Packaged build folder - unpacking to {staging} and applying Full / Partial pieces like a Drive download.");
+                await BuildUpdateService.ExtractToFolderAsync(archivePath, staging, sliceProgress($"{label} - unpacking", 0, unpackShare), ct);
+
+                // Drop single-folder wrappers ("v271.4.0\" -> its contents).
+                var root = staging;
+                while (Directory.GetFiles(root).Length == 0 && Directory.GetDirectories(root) is { Length: 1 } only
+                       && !FullFolderRegex.IsMatch(Path.GetFileName(only[0])) && !PartialFolderRegex.IsMatch(Path.GetFileName(only[0])))
+                {
+                    root = only[0];
+                }
+
+                var fulls = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                    .Where(BuildRepoDefaults.IsFullArchive)
+                    .OrderBy(f => Path.GetRelativePath(root, f), NaturalStringComparer.Instance)
+                    .ToList();
+                if (fulls.Count == 0)
+                {
+                    foreach (var fullDir in Directory.GetDirectories(root)
+                                 .Where(d => FullFolderRegex.IsMatch(Path.GetFileName(d)))
+                                 .OrderBy(d => Path.GetFileName(d), NaturalStringComparer.Instance))
+                    {
+                        var archives = Directory.EnumerateFiles(fullDir, "*", SearchOption.AllDirectories)
+                            .Where(BuildRepoDefaults.IsArchive).ToList();
+                        if (archives.Count == 1) fulls.Add(archives[0]);
+                    }
+                }
+
+                var steps = new List<(string Label, Func<IProgress<UpdateProgress>, Task> Run)>();
+
+                if (mode == UpdateMode.NewBuild && fulls.Count == 0)
+                {
+                    steps.Add(("New Build: clear build folder", _ => BuildUpdateService.ClearBuildFolderAsync(buildPath, ct)));
+                }
+
+                for (int k = 0; k < fulls.Count; k++)
+                {
+                    var full = fulls[k];
+                    var fullMode = k == 0 && mode == UpdateMode.NewBuild ? UpdateMode.NewBuild : UpdateMode.Patch;
+                    steps.Add(($"{(fullMode == UpdateMode.NewBuild ? "New Build" : "Patch")}: {Path.GetRelativePath(root, full)}", async p =>
+                    {
+                        await BuildUpdateService.RunAsync(full, buildPath, fullMode, p, ct);
+                        RemoveAppliedArchive(full, root); // so the Patch steps below don't see it again
+                    }));
+                }
+
+                foreach (var partialDir in Directory.GetDirectories(root)
+                             .Where(d => PartialFolderRegex.IsMatch(Path.GetFileName(d)))
+                             .OrderBy(d => Path.GetFileName(d), NaturalStringComparer.Instance))
+                {
+                    var partName = Path.GetFileName(partialDir);
+                    steps.Add(($"Patch: {partName}", async p =>
+                    {
+                        if (BuildUpdateService.HasPatchContent(partialDir))
+                            await BuildUpdateService.RunPatchFromFolderAsync(partialDir, buildPath, p, ct);
+                        else
+                            Log($"    {partName}: nothing to patch (only checksum files) - skipped.");
+                    }));
+                }
+
+                steps.Add(("Patch: remaining build files", async p =>
+                {
+                    if (BuildUpdateService.HasPatchContent(root))
+                        await BuildUpdateService.RunPatchFromFolderAsync(root, buildPath, p, ct);
+                    else
+                        Log("    Nothing else left to patch - skipped.");
+                }));
+
+                var stepShare = (1 - unpackShare) / steps.Count;
+                for (int s = 0; s < steps.Count; s++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (stepLabel, run) = steps[s];
+                    Log($"    Step {s + 1} of {steps.Count} - {stepLabel}");
+                    await run(sliceProgress($"{label} - {stepLabel}", unpackShare + s * stepShare, stepShare));
+                }
+            }
+            finally
+            {
+                TryDeleteDirectory(staging);
+                CleanupEmptyStagingParents(staging);
+            }
+        }
+
+        // Same rules as BuildRepoNode's Full/Partial folder tags.
+        private static readonly System.Text.RegularExpressions.Regex FullFolderRegex =
+            new(@"^\s*Full(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        private static readonly System.Text.RegularExpressions.Regex PartialFolderRegex =
+            new(@"^\s*Partial(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         // Batch: several Full/Partial folders of ONE build (ticked in the tree), Full first. Everything is downloaded
         // first - each Partial into its own numbered staging subfolder so their contents never mix -
