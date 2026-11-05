@@ -294,6 +294,44 @@
                 </StackPanel>
             </Border>
 
+            <!-- Self-update - see UpdateViewModel / AppUpdateService. Acts immediately; nothing here
+                 needs Save Settings. Version stamp comes from the csproj's BuildCode/BuildDate. -->
+            <Border Style="{StaticResource SectionCard}" DataContext="{Binding Updates}">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" Foreground="#FF888888" FontSize="11"
+                                   Text="{Binding LastCheckedDisplay}"/>
+                        <TextBlock Text="Updates" FontSize="16" FontWeight="Bold"/>
+                    </DockPanel>
+                    <TextBlock Margin="0,2,0,8">
+                        <Run Text="Version:"/>
+                        <Run Text="{Binding CurrentVersionDisplay, Mode=OneWay}" FontWeight="Bold" Foreground="#FFCC6F00"/>
+                    </TextBlock>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                        <Button Content="Check for Updates" Width="140" Padding="8,4" Margin="0,0,8,0"
+                                Command="{Binding CheckForUpdatesCommand}"/>
+                        <Button Content="Sign in to Confluence" Width="150" Padding="8,4" Margin="0,0,8,0"
+                                Command="{Binding SignInCommand}"
+                                Visibility="{Binding IsSignedIn, Converter={StaticResource InverseBoolToVis}}"
+                                ToolTip="Opens the Nexon SSO sign-in. Only needed once - the sign-in is remembered."/>
+                        <Button Content="Forget Sign-in" Width="110" Padding="8,4" Margin="0,0,8,0"
+                                Command="{Binding ForgetSignInCommand}"
+                                ToolTip="Removes the saved Confluence/SSO sign-in from this PC."/>
+                        <Button Content="Cancel" Width="70" Padding="8,4" Command="{Binding CancelCommand}"
+                                Visibility="{Binding IsBusy, Converter={StaticResource BoolToVis}}"/>
+                    </StackPanel>
+                    <ProgressBar Height="6" Margin="0,0,0,6" Minimum="0" Maximum="100" Value="{Binding ProgressPercent, Mode=OneWay}"
+                                 Visibility="{Binding HasProgress, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding StatusText}" TextWrapping="Wrap" Foreground="#FF444444" Margin="0,0,0,6"/>
+                    <CheckBox Content="Check for updates when Maple Central starts" IsChecked="{Binding CheckOnStartup}"/>
+                    <TextBlock TextWrapping="Wrap" Foreground="#FF666666" FontSize="11" Margin="0,4,0,0">
+                        <Run Text="Updates come from the newest .7z on the Maple Central Confluence page (QA space). If it's newer than this build,"/>
+                        <Run Text=" you'll be asked before anything is installed; Maple Central then closes, updates, and reopens itself."/>
+                        <Run Text=" Your Confluence sign-in is saved on this PC (encrypted to your Windows account), so checks log in automatically."/>
+                    </TextBlock>
+                </StackPanel>
+            </Border>
+
             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                 <Button Content="Save Settings" Width="140" Padding="8,4" Command="{Binding SaveCommand}"/>
                 <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Margin="12,0,0,0" Foreground="#FF2E7D32"/>

@@ -34,6 +34,8 @@ namespace CommandCenter.ViewModel
             _settingsService = settingsService;
             _onTabsCommitted = onTabsCommitted;
 
+            Updates = new UpdateViewModel(appSettings, settingsService);
+
             AddTabCommand = new RelayCommand(_ => AddTab());
             SaveCommand = new RelayCommand(_ => Save(), _ => IsDirty);
 
@@ -151,6 +153,10 @@ namespace CommandCenter.ViewModel
 
         public RelayCommand AddTabCommand { get; }
         public RelayCommand SaveCommand { get; }
+
+        // Settings > Updates card (version stamp + Check for Updates + Confluence sign-in). Not part
+        // of the draft/Save flow - everything on it acts or saves immediately.
+        public UpdateViewModel Updates { get; }
 
         // No more GMS/CMS/Live picker - extras are independent top-level tabs now, not nested
         // under a parent category, so there's nothing meaningful to pick. Every tab created here

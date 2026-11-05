@@ -16,9 +16,12 @@ namespace CommandCenter.View
         private readonly Func<string?, bool> _isSignedInPage;
         private bool _signedIn;
 
-        public GoogleSignInWindow(string startUrl, Func<string?, bool>? isSignedInPage = null)
+        public GoogleSignInWindow(string startUrl, Func<string?, bool>? isSignedInPage = null,
+            string? title = null, string? instructions = null)
         {
             InitializeComponent();
+            if (title != null) Title = title;
+            if (instructions != null) StatusText.Text = instructions;
             _startUrl = startUrl;
             _isSignedInPage = isSignedInPage ?? GoogleWebSession.IsSheetPage;
             Loaded += OnLoaded;
@@ -29,9 +32,12 @@ namespace CommandCenter.View
         // isSignedInPage decides when the target page has been reached (= sign-in worked). Defaults
         // to "a Google Sheet loaded" for the Maintenance tab; Build Repo passes
         // GoogleWebSession.IsDriveFolderPage instead since it starts on a Drive folder.
-        public static bool Prompt(Window? owner, string startUrl, Func<string?, bool>? isSignedInPage = null)
+        // title/instructions let non-Google sign-ins (Confluence / Nexon SSO for the self-updater -
+        // see UpdateViewModel) reuse this same window and its shared WebView2 profile.
+        public static bool Prompt(Window? owner, string startUrl, Func<string?, bool>? isSignedInPage = null,
+            string? title = null, string? instructions = null)
         {
-            var window = new GoogleSignInWindow(startUrl, isSignedInPage);
+            var window = new GoogleSignInWindow(startUrl, isSignedInPage, title, instructions);
             if (owner != null && owner.IsVisible) window.Owner = owner;
             window.ShowDialog();
             return window._signedIn;

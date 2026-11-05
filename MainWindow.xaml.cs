@@ -14,6 +14,16 @@ namespace CommandCenter
             ElevatedFileDropBridge.Attach(this);
             StateChanged += (_, _) => UpdateMaximizeRestoreToolTip();
             UpdateMaximizeRestoreToolTip();
+
+            // Silent self-update check once the window is up (needs a real window handle for the
+            // hidden WebView2). Only speaks up if an update is found - see UpdateViewModel.
+            ContentRendered += async (_, _) =>
+            {
+                if (DataContext is CommandCenter.ViewModel.MainViewModel vm)
+                {
+                    await vm.Settings.Updates.CheckOnStartupAsync();
+                }
+            };
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e) => SystemCommands.MinimizeWindow(this);

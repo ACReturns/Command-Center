@@ -940,13 +940,27 @@ namespace CommandCenter.ViewModel
                     case BuildRepoNodeKind.Root:
                     {
                         var items = await ListCachedAsync(node.DriveId, ct);
-                        children = items
+                        var versions = items
                             .Where(i => i.IsFolder)
                             .OrderByDescending(i => BuildRepoDefaults.VersionKey(i.Name), Comparer<int[]>.Create(BuildRepoDefaults.CompareVersionKeys))
                             .ThenBy(i => i.Name, NaturalStringComparer.Instance)
+                            .ToList();
+
+                        // Before populating: walk down from the newest version and drop any whose
+                        // "Build" folder is empty/missing, stopping at the first one that has
+                        // content. Everything below that shows unchecked, as before.
+                        var hidden = 0;
+                        while (versions.Count > 0 && !await VersionHasBuildDataAsync(versions[0], ct))
+                        {
+                            versions.RemoveAt(0);
+                            hidden++;
+                        }
+                        if (hidden > 0) Log($"Hid {hidden} newest version(s) with an empty Build folder.");
+
+                        children = versions
                             .Select(i => new BuildRepoNode(BuildRepoNodeKind.Version, i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
                             .ToList();
-                        if (children.Count == 0) children.Add(Message("No version folders found.", node));
+                        if (children.Count == 0) children.Add(Message(hidden > 0 ? "No version folders with builds found." : "No version folders found.", node));
                         Log($"Listed {children.Count(c => !c.IsMessage)} version(s).");
                         break;
                     }
@@ -955,9 +969,7 @@ namespace CommandCenter.ViewModel
                     {
                         // Step into the version's "Build" folder - its children are the builds.
                         var items = await ListCachedAsync(node.DriveId, ct);
-                        var buildFolder = items.FirstOrDefault(i => i.IsFolder
-                                              && string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase))
-                                          ?? items.FirstOrDefault(i => string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase));
+                        var buildFolder = FindBuildFolder(items);
 
                         if (buildFolder == null)
                         {
@@ -1016,6 +1028,34 @@ namespace CommandCenter.ViewModel
             finally
             {
                 node.IsLoading = false;
+            }
+        }
+
+        private static DriveItem? FindBuildFolder(List<DriveItem> items) =>
+            items.FirstOrDefault(i => i.IsFolder
+                                      && string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase))
+            ?? items.FirstOrDefault(i => string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// True when the version's "Build" folder exists and has something in it. Listings are
+        /// cached, so expanding the version afterwards costs nothing extra. If the check itself
+        /// fails (other than sign-in/cancel), the version is kept rather than hidden on a guess.
+        /// </summary>
+        private async Task<bool> VersionHasBuildDataAsync(DriveItem version, CancellationToken ct)
+        {
+            try
+            {
+                var items = await ListCachedAsync(version.Id, ct);
+                var buildFolder = FindBuildFolder(items);
+                return buildFolder != null && buildFolder.IsFolder
+                       && (await ListCachedAsync(buildFolder.Id, ct)).Count > 0;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SignInRequiredException) { throw; }
+            catch (Exception ex)
+            {
+                Log($"Couldn't check {version.Name}'s Build folder: {ex.Message}");
+                return true;
             }
         }
 

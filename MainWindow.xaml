@@ -166,7 +166,19 @@
              bold once free space actually drops under the low-space threshold (IsStorageLow). -->
         <Border Grid.Row="2" Grid.ColumnSpan="2" BorderThickness="0,1,0,0" Padding="10,6"
                 Background="{Binding StorageBackgroundBrush}" BorderBrush="{Binding StorageBorderBrush}">
-            <TextBlock Text="{Binding StorageTrackerText}" TextWrapping="Wrap" Foreground="{Binding StorageForegroundBrush}">
+            <DockPanel LastChildFill="True">
+            <!-- Self-update status (UpdateViewModel.BarText), right of a divider: "Checking for
+                 updates...", "Up to date · ADW-MC-01", etc. Hidden entirely when there's nothing
+                 to say (update check off / not run yet). -->
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"
+                        Visibility="{Binding Settings.Updates.HasBarText, Converter={StaticResource BoolToVis}}">
+                <Rectangle Width="1" Margin="12,0" VerticalAlignment="Stretch" MinHeight="14"
+                           Fill="{Binding StorageForegroundBrush}" Opacity="0.4"/>
+                <TextBlock Text="{Binding Settings.Updates.BarText}" Foreground="{Binding StorageForegroundBrush}"
+                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="420"
+                           ToolTip="{Binding Settings.Updates.StatusText}"/>
+            </StackPanel>
+            <TextBlock Text="{Binding StorageTrackerText}" TextWrapping="Wrap" Foreground="{Binding StorageForegroundBrush}" VerticalAlignment="Center">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Style.Triggers>
@@ -177,6 +189,7 @@
                     </Style>
                 </TextBlock.Style>
             </TextBlock>
+            </DockPanel>
         </Border>
     </Grid>
 </Window>

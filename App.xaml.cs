@@ -29,6 +29,10 @@ namespace CommandCenter
                 return;
             }
 
+            // If the self-updater just ran, confirm the new files landed and record which package
+            // is now installed (see AppUpdateService). Best-effort, never blocks startup.
+            CommandCenter.Services.AppUpdateService.FinalizePendingInstall();
+
             base.OnStartup(e);
         }
 

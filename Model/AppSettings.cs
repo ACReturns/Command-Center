@@ -136,6 +136,15 @@ namespace CommandCenter.Model
         // LauncherViewModel. Null on a settings.json saved before the Launcher existed.
         public Guid? LauncherLastTabId { get; set; }
 
+        // Self-update (Settings > Updates - see UpdateViewModel / AppUpdateService). Startup check is
+        // silent unless an update is found and never opens the sign-in window. Page id / base URL
+        // default to UpdateDefaults (the QA "Maple Central" Confluence page) when blank - only
+        // editable in settings.json, not the UI, since the page shouldn't normally move.
+        public bool CheckForUpdatesOnStartup { get; set; } = true;
+        public DateTime? LastUpdateCheck { get; set; }
+        public string UpdateConfluenceBaseUrl { get; set; } = UpdateDefaults.ConfluenceBaseUrl;
+        public string UpdatePageId { get; set; } = UpdateDefaults.PageId;
+
         // LEGACY - see SectionSettings above. Present only for backward-compatible
         // deserialization of a settings.json saved before tabs existed; SettingsService.Load
         // resets these to empty immediately after migrating them into Tabs once.
