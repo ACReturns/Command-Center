@@ -19,6 +19,7 @@ namespace CommandCenter.ViewModel
         Root,     // "MapleStory (GMS)" - the configured root Drive folder
         Version,  // a version folder under the root (v271.4.0); its children come from its "Build" subfolder
         Build,    // a direct child of a version's Build folder (1TC, 2TC, v271.4.0 (Minor Patch)) - the "head" download
+        DocFolder,// Documentation view: a version's "Commodity" / "Checklist" folder (sibling of "Build")
         Folder,   // any folder below a build
         File,     // a downloadable file
         Message   // non-interactive placeholder ("loading", "empty", errors)
@@ -41,9 +42,11 @@ namespace CommandCenter.ViewModel
 
         public BuildRepoNode(BuildRepoNodeKind kind, string name, string? driveId, BuildRepoNode? parent,
             Func<BuildRepoNode, Task>? loader = null, Action<BuildRepoNode>? onSelected = null,
-            Action<BuildRepoNode>? onBatchToggled = null)
+            Action<BuildRepoNode>? onBatchToggled = null, bool isDocumentation = false)
         {
             Kind = kind;
+            // Children inherit it, so every node under the Documentation root knows which view it's in.
+            IsDocumentation = isDocumentation || (parent?.IsDocumentation ?? false);
             Name = name;
             DriveId = driveId;
             Parent = parent;
@@ -61,14 +64,16 @@ namespace CommandCenter.ViewModel
             new(@"^\s*Full(?![A-Za-z])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
         /// <summary>A Full folder inside a build - always applied before any Partial in a batch.</summary>
-        public bool IsFullFolder => Kind == BuildRepoNodeKind.Folder && FullFolderPattern.IsMatch(Name);
+        public bool IsFullFolder => !IsDocumentation && Kind == BuildRepoNodeKind.Folder && FullFolderPattern.IsMatch(Name);
 
         /// <summary>Full folder or Full_*.zip/.7z file - tagged "New Build" in the tree.</summary>
-        public bool IsFullItem => IsFullFolder || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsFullArchive(Name));
+        public bool IsFullItem => !IsDocumentation
+                                  && (IsFullFolder || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsFullArchive(Name)));
 
         /// <summary>Partial folder or Partial_*.zip/.7z file - tagged "Patch" in the tree.</summary>
-        public bool IsPartialItem => (Kind == BuildRepoNodeKind.Folder && PartialFolderPattern.IsMatch(Name))
-                                     || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsPartialArchive(Name));
+        public bool IsPartialItem => !IsDocumentation
+                                     && ((Kind == BuildRepoNodeKind.Folder && PartialFolderPattern.IsMatch(Name))
+                                         || (Kind == BuildRepoNodeKind.File && BuildRepoDefaults.IsPartialArchive(Name)));
 
         public bool HasModeTag => IsFullItem || IsPartialItem;
 
@@ -76,8 +81,15 @@ namespace CommandCenter.ViewModel
         /// A Full or Partial folder inside a build - these get a checkbox so several can be
         /// batch-downloaded and applied one after another (Full first, then tree order) in one run.
         /// </summary>
-        public bool IsBatchEligible => Kind == BuildRepoNodeKind.Folder && DriveId != null && BuildAncestor != null
-                                       && (PartialFolderPattern.IsMatch(Name) || FullFolderPattern.IsMatch(Name));
+        public bool IsBatchEligible => IsDocumentation
+            // Documentation view: Commodity/Checklist themselves and anything inside them can be batched.
+            ? DriveId != null && Kind is BuildRepoNodeKind.DocFolder or BuildRepoNodeKind.Folder or BuildRepoNodeKind.File
+            : Kind == BuildRepoNodeKind.Folder && DriveId != null && BuildAncestor != null
+              && (PartialFolderPattern.IsMatch(Name) || FullFolderPattern.IsMatch(Name));
+
+        public string BatchToolTip => IsDocumentation
+            ? "Add to batch - tick several folders/files from the same version to download them all into its Documents in one go"
+            : "Add to batch - tick several Full/Partial folders from the same build to download and apply them in order (Full first)";
 
         public bool IsBatchChecked
         {
@@ -111,13 +123,19 @@ namespace CommandCenter.ViewModel
         public BuildRepoNode? Parent { get; }
         public ObservableCollection<BuildRepoNode> Children { get; } = new();
 
+        /// <summary>True for every node in the Documentation view's tree (Commodity / Checklist content).</summary>
+        public bool IsDocumentation { get; }
+
+        /// <summary>Drive MIME type when known - native Google Docs/Sheets need exporting instead of a plain download.</summary>
+        public string? MimeType { get; init; }
+
         public bool IsFolder => Kind is BuildRepoNodeKind.Root or BuildRepoNodeKind.Version
-                                     or BuildRepoNodeKind.Build or BuildRepoNodeKind.Folder;
+                                     or BuildRepoNodeKind.Build or BuildRepoNodeKind.DocFolder or BuildRepoNodeKind.Folder;
         public bool IsExpandable => IsFolder;
         public bool IsMessage => Kind == BuildRepoNodeKind.Message;
 
         /// <summary>Only a build (head folder), a folder inside it, or a single file can be downloaded.</summary>
-        public bool CanDownload => Kind is BuildRepoNodeKind.Build or BuildRepoNodeKind.Folder or BuildRepoNodeKind.File;
+        public bool CanDownload => Kind is BuildRepoNodeKind.Build or BuildRepoNodeKind.DocFolder or BuildRepoNodeKind.Folder or BuildRepoNodeKind.File;
 
         public bool IsLoaded { get; set; }
 
@@ -169,6 +187,7 @@ namespace CommandCenter.ViewModel
             BuildRepoNodeKind.Root => "",    // game controller
             BuildRepoNodeKind.Version => "", // library
             BuildRepoNodeKind.Build => "",   // package
+            BuildRepoNodeKind.DocFolder => "\uE9D5", // checklist
             BuildRepoNodeKind.Folder => "",  // folder
             BuildRepoNodeKind.File => "",    // document
             _ => string.Empty
@@ -193,6 +212,19 @@ namespace CommandCenter.ViewModel
                 for (var n = this; n != null; n = n.Parent)
                 {
                     if (n.Kind == BuildRepoNodeKind.Build) return n;
+                }
+                return null;
+            }
+        }
+
+        /// <summary>The Commodity/Checklist folder this node sits under (itself if it is one), or null.</summary>
+        public BuildRepoNode? DocFolderAncestor
+        {
+            get
+            {
+                for (var n = this; n != null; n = n.Parent)
+                {
+                    if (n.Kind == BuildRepoNodeKind.DocFolder) return n;
                 }
                 return null;
             }
@@ -260,7 +292,14 @@ namespace CommandCenter.ViewModel
         private bool _initialized;
 
         private BuildRepoNode _root;
-        private BuildRepoNode? _selectedNode;
+        // Documentation view: same version folders, but each one opens to its Commodity/Checklist
+        // folders instead of its Build folder. Separate tree + selection so switching views keeps
+        // each one's expanded state and highlighted row.
+        private BuildRepoNode _docsRoot;
+        private bool _docsInitialized;
+        private bool _isDocumentsView;
+        private BuildRepoNode? _selectedBuildNode;
+        private BuildRepoNode? _selectedDocNode;
         private BuildRepoTargetOption? _selectedTarget;
         private bool _extractAfterDownload;
         private bool _patchAfterDownload;
@@ -293,15 +332,17 @@ namespace CommandCenter.ViewModel
 
             _root = CreateRoot();
             RootNodes.Add(_root);
+            _docsRoot = CreateRoot(documentation: true);
+            DocRootNodes.Add(_docsRoot);
 
             RefreshCommand = new AsyncRelayCommand(_ => RefreshTreeAsync(), _ => !IsBusy);
             SignInCommand = new AsyncRelayCommand(_ => SignInAsync(), _ => !IsBusy);
             DownloadCommand = new AsyncRelayCommand(_ => DownloadSelectedAsync(), _ => CanDownload);
             CancelCommand = new RelayCommand(_ => _cts?.Cancel(), _ => IsBusy);
             ResumeCommand = new RelayCommand(_ => _resumeDecision?.TrySetResult(true), _ => IsAwaitingResume);
-            OpenBuildFolderCommand = new RelayCommand(_ => OpenFolder(SelectedTarget?.BuildPath),
-                _ => SelectedTarget?.HasBuildPath == true);
-            ClearBatchCommand = new RelayCommand(_ => ClearBatch(), _ => IsBatchMode && !IsBusy);
+            OpenBuildFolderCommand = new RelayCommand(_ => OpenFolder(IsDocumentsView ? CurrentDocumentsDestination()?.Path : SelectedTarget?.BuildPath),
+                _ => SelectedTarget?.HasBuildPath == true && (!IsDocumentsView || CurrentDocumentsDestination() != null));
+            ClearBatchCommand = new RelayCommand(_ => { if (IsDocumentsView) ClearDocBatch(); else ClearBatch(); }, _ => ShowClearBatch && !IsBusy);
 
             AddLocalFilesCommand = new RelayCommand(_ => AddLocalFiles(), _ => !IsBusy);
             ClearLocalFilesCommand = new RelayCommand(_ => LocalFiles.Clear(), _ => !IsBusy && LocalFiles.Count > 0);
@@ -324,21 +365,81 @@ namespace CommandCenter.ViewModel
         public string RootFolderUrl =>
             string.IsNullOrWhiteSpace(_appSettings.BuildRepoFolderUrl) ? BuildRepoDefaults.RootFolderUrl : _appSettings.BuildRepoFolderUrl;
 
-        public BuildRepoNode? SelectedNode
+        /// <summary>Documentation view's TreeView ItemsSource - its own head node.</summary>
+        public ObservableCollection<BuildRepoNode> DocRootNodes { get; } = new();
+
+        /// <summary>The highlighted row of whichever view (Builds / Documentation) is showing.</summary>
+        public BuildRepoNode? SelectedNode => IsDocumentsView ? _selectedDocNode : _selectedBuildNode;
+
+        private void RaiseSelectionChanged()
         {
-            get => _selectedNode;
-            private set
+            OnPropertyChanged(nameof(SelectedNode));
+            OnPropertyChanged(nameof(SelectionText));
+            OnPropertyChanged(nameof(CanDownload));
+            OnPropertyChanged(nameof(DownloadButtonText));
+            OnPropertyChanged(nameof(TargetBuildPathText));
+            System.Windows.Input.CommandManager.InvalidateRequerySuggested();
+        }
+
+        // ---------- Builds / Documentation view switch ----------
+
+        /// <summary>
+        /// The two tabs above the tree. Builds = the original tree (version > Build folder > builds).
+        /// Documentation = same version list, but each version opens to its "Commodity" and
+        /// "Checklist" folders (siblings of "Build"), and downloads go into the target tab's
+        /// Documents folder for that version instead of its build folder - no extract/patch.
+        /// </summary>
+        public bool IsDocumentsView
+        {
+            get => _isDocumentsView;
+            set
             {
-                if (SetProperty(ref _selectedNode, value))
+                if (!SetProperty(ref _isDocumentsView, value)) return;
+                if (value && !_docsInitialized)
                 {
-                    OnPropertyChanged(nameof(SelectionText));
-                    OnPropertyChanged(nameof(CanDownload));
-                    OnPropertyChanged(nameof(DownloadButtonText));
+                    _docsInitialized = true;
+                    _docsRoot.IsExpanded = true; // first listing, the first time the view is opened
                 }
+                OnPropertyChanged(nameof(IsBuildsView));
+                OnPropertyChanged(nameof(HeaderHint));
+                OnPropertyChanged(nameof(TargetPathLabel));
+                OnPropertyChanged(nameof(OpenFolderButtonText));
+                OnPropertyChanged(nameof(ShowTargetRows));
+                OnPropertyChanged(nameof(ShowClearBatch));
+                RaiseSelectionChanged();
             }
         }
 
-        public string SelectionText => IsBatchMode
+        public bool IsBuildsView
+        {
+            get => !_isDocumentsView;
+            set { if (value) IsDocumentsView = false; }
+        }
+
+        public string HeaderHint => IsDocumentsView
+            ? "Click (+) on a version to see its Commodity and Checklist folders. Select a folder or file to download it into the chosen tab's Documents for that version."
+            : "Click (+) on a version to see its builds, and (+) on a build to see what's inside. Select a build, folder or file to download it - or tick several Full/Partial folders in one build to batch them (Full is applied first).";
+
+        public string TargetPathLabel => IsDocumentsView ? "Documents folder:" : "Current Build directory:";
+        public string OpenFolderButtonText => IsDocumentsView ? "Open Documents Folder" : "Open Build Folder";
+
+        // Target tab rows: always shown in Documentation view (Local Files / Transfer don't apply there).
+        public bool ShowTargetRows => IsDocumentsView || IsNotTransferMode;
+
+        // Batch only exists in the Builds view - ticked folders stay ticked while Documentation is showing.
+        private bool BatchActive => IsBatchMode && !IsDocumentsView;
+        public bool ShowClearBatch => IsDocumentsView ? IsDocBatchMode : BatchActive;
+
+        public string SelectionText => IsDocumentsView
+            ? (IsDocBatchMode
+                ? $"Batch ({_docBatch.Count}) from {_docBatch[0].VersionAncestor?.Name}:  " +
+                  string.Join("  ·  ", _docBatch.Select(n => n.DocFolderAncestor is { } d && !ReferenceEquals(d, n) ? $"{d.Name} › {n.Name}" : n.Name))
+                : SelectedNode == null
+                ? "Nothing selected - open a version and pick Commodity, Checklist, or a folder/file inside one."
+                : SelectedNode.CanDownload
+                    ? SelectedNode.Breadcrumb
+                    : $"{SelectedNode.Breadcrumb}   (pick Commodity, Checklist, or something inside one to download)")
+            : IsBatchMode
             ? $"Batch ({_batch.Count}), applied in this order:  {_batch[0].BuildAncestor?.Breadcrumb}  ›  " +
               string.Join("  →  ", _batch.Select(n => n.Name))
             : SelectedNode == null
@@ -355,8 +456,63 @@ namespace CommandCenter.ViewModel
         /// <summary>True once any Full/Partial folder is ticked - the download then uses the ticked folders, not the highlighted row.</summary>
         public bool IsBatchMode => _batch.Count > 0;
 
+        // ---------- Documentation batch (several folders/files from one version) ----------
+
+        // Ticked documentation items, in tree order. All from one version, so they share one Documents folder.
+        private readonly List<BuildRepoNode> _docBatch = new();
+
+        public bool IsDocBatchMode => _docBatch.Count > 0;
+
+        private void OnDocBatchToggled(BuildRepoNode node)
+        {
+            if (node.IsBatchChecked)
+            {
+                // Same version only (the destination folder depends on it); a folder and something
+                // inside it can't both be ticked - the newer tick wins.
+                var version = node.VersionAncestor;
+                var dropped = _docBatch.Where(n => !ReferenceEquals(n.VersionAncestor, version)
+                                                   || n.IsAncestorOf(node) || node.IsAncestorOf(n)).ToList();
+                foreach (var d in dropped)
+                {
+                    d.ClearBatchSilently();
+                    _docBatch.Remove(d);
+                }
+                if (dropped.Any(d => !ReferenceEquals(d.VersionAncestor, version)))
+                {
+                    StatusText = $"Batch reset - batched documents have to come from the same version ({version?.Name}).";
+                }
+                if (!_docBatch.Contains(node)) _docBatch.Add(node);
+                _docBatch.Sort(CompareTreeOrder);
+            }
+            else
+            {
+                _docBatch.Remove(node);
+            }
+            OnDocBatchChanged();
+        }
+
+        private void ClearDocBatch()
+        {
+            foreach (var n in _docBatch) n.ClearBatchSilently();
+            _docBatch.Clear();
+            OnDocBatchChanged();
+        }
+
+        private void OnDocBatchChanged()
+        {
+            OnPropertyChanged(nameof(IsDocBatchMode));
+            OnPropertyChanged(nameof(ShowClearBatch));
+            RaiseSelectionChanged();
+        }
+
         private void OnBatchToggled(BuildRepoNode node)
         {
+            if (node.IsDocumentation)
+            {
+                OnDocBatchToggled(node);
+                return;
+            }
+
             if (node.IsBatchChecked)
             {
                 // Same build only - ticking a folder under a different build starts a new batch.
@@ -392,6 +548,7 @@ namespace CommandCenter.ViewModel
         private void OnBatchChanged()
         {
             OnPropertyChanged(nameof(IsBatchMode));
+            OnPropertyChanged(nameof(ShowClearBatch));
             OnPropertyChanged(nameof(SelectionText));
             OnPropertyChanged(nameof(CanDownload));
             OnPropertyChanged(nameof(DownloadButtonText));
@@ -429,6 +586,7 @@ namespace CommandCenter.ViewModel
                 OnPropertyChanged(nameof(TargetBuildPathText));
                 OnPropertyChanged(nameof(TargetHasNoBuildPath));
                 OnPropertyChanged(nameof(CanDownload));
+                System.Windows.Input.CommandManager.InvalidateRequerySuggested();
 
                 if (value != null && _appSettings.BuildRepoLastTargetTabId != value.Id)
                 {
@@ -440,9 +598,13 @@ namespace CommandCenter.ViewModel
 
         public string TargetBuildPathText => SelectedTarget == null
             ? "No tab selected."
-            : SelectedTarget.HasBuildPath
-                ? SelectedTarget.BuildPath
-                : "This tab has no Current Build directory set - set one in Settings first.";
+            : !SelectedTarget.HasBuildPath
+                ? "This tab has no Current Build directory set - set one in Settings first."
+                : !IsDocumentsView
+                    ? SelectedTarget.BuildPath
+                    : CurrentDocumentsDestination() is { } dest
+                        ? (dest.IsCurrent ? dest.Path : $"{dest.Path}   (shows in {SelectedTarget.Title}'s Documents once it's on {dest.Family})")
+                        : "Select a version's Commodity or Checklist content to see where it'll go.";
 
         public bool TargetHasNoBuildPath => SelectedTarget != null && !SelectedTarget.HasBuildPath;
 
@@ -491,7 +653,9 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        public string DownloadButtonText => UseTransfer
+        public string DownloadButtonText => IsDocumentsView
+            ? "Download Documents" + (IsDocBatchMode ? $" ({_docBatch.Count} items)" : "")
+            : UseTransfer
             ? "Transfer Build"
             : UseLocalFiles
             ? $"Extract Local Files ({LocalFiles.Count})"
@@ -499,7 +663,9 @@ namespace CommandCenter.ViewModel
                : PatchAfterDownload ? "Download & Patch"
                : "Download") + (IsBatchMode ? $" ({_batch.Count} folders)" : "");
 
-        public bool CanDownload => !IsBusy && (UseTransfer
+        public bool CanDownload => !IsBusy && (IsDocumentsView
+            ? SelectedTarget?.HasBuildPath == true && (IsDocBatchMode || (SelectedNode?.CanDownload == true && SelectedNode.DriveId != null))
+            : UseTransfer
             ? CanTransfer
             : SelectedTarget?.HasBuildPath == true
               && (UseLocalFiles
@@ -572,6 +738,7 @@ namespace CommandCenter.ViewModel
             OnPropertyChanged(nameof(IsLocalExtractMode));
             OnPropertyChanged(nameof(UseTransfer));
             OnPropertyChanged(nameof(IsNotTransferMode));
+            OnPropertyChanged(nameof(ShowTargetRows));
             OnPropertyChanged(nameof(ShowLocalExtractPanel));
             OnPropertyChanged(nameof(DownloadButtonText));
             OnPropertyChanged(nameof(CanDownload));
@@ -891,14 +1058,20 @@ namespace CommandCenter.ViewModel
 
         // ---------- Tree ----------
 
-        private BuildRepoNode CreateRoot()
+        private BuildRepoNode CreateRoot(bool documentation = false)
         {
             BuildRepoDefaults.TryParseFolderId(RootFolderUrl, out var rootId);
             return new BuildRepoNode(BuildRepoNodeKind.Root, BuildRepoDefaults.RootTitle,
-                string.IsNullOrEmpty(rootId) ? null : rootId, null, LoadChildrenAsync, OnNodeSelected, OnBatchToggled);
+                string.IsNullOrEmpty(rootId) ? null : rootId, null, LoadChildrenAsync, OnNodeSelected, OnBatchToggled,
+                isDocumentation: documentation);
         }
 
-        private void OnNodeSelected(BuildRepoNode node) => SelectedNode = node;
+        private void OnNodeSelected(BuildRepoNode node)
+        {
+            if (node.IsDocumentation) _selectedDocNode = node;
+            else _selectedBuildNode = node;
+            RaiseSelectionChanged();
+        }
 
         private BuildRepoNode Message(string text, BuildRepoNode parent) =>
             new(BuildRepoNodeKind.Message, text, null, parent);
@@ -910,11 +1083,18 @@ namespace CommandCenter.ViewModel
 
             _listingCache.Clear();
             ClearBatch();
+            ClearDocBatch();
             RootNodes.Clear();
-            SelectedNode = null;
+            DocRootNodes.Clear();
+            _selectedBuildNode = null;
+            _selectedDocNode = null;
+            RaiseSelectionChanged();
             _root = CreateRoot();
             RootNodes.Add(_root);
+            _docsRoot = CreateRoot(documentation: true);
+            DocRootNodes.Add(_docsRoot);
             _root.IsExpanded = true; // starts LoadChildrenAsync
+            if (_docsInitialized) _docsRoot.IsExpanded = true;
 
             await Task.CompletedTask;
         }
@@ -950,18 +1130,38 @@ namespace CommandCenter.ViewModel
                         // "Build" folder is empty/missing, stopping at the first one that has
                         // content. Everything below that shows unchecked, as before.
                         var hidden = 0;
-                        while (versions.Count > 0 && !await VersionHasBuildDataAsync(versions[0], ct))
+                        // (Documentation view: same idea, keyed off the Commodity/Checklist folders instead.)
+                        while (versions.Count > 0 && !await (node.IsDocumentation
+                                   ? VersionHasDocumentationAsync(versions[0], ct)
+                                   : VersionHasBuildDataAsync(versions[0], ct)))
                         {
                             versions.RemoveAt(0);
                             hidden++;
                         }
-                        if (hidden > 0) Log($"Hid {hidden} newest version(s) with an empty Build folder.");
+                        if (hidden > 0) Log(node.IsDocumentation
+                            ? $"Documentation: hid {hidden} newest version(s) with no Commodity/Checklist content."
+                            : $"Hid {hidden} newest version(s) with an empty Build folder.");
 
                         children = versions
                             .Select(i => new BuildRepoNode(BuildRepoNodeKind.Version, i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
                             .ToList();
                         if (children.Count == 0) children.Add(Message(hidden > 0 ? "No version folders with builds found." : "No version folders found.", node));
                         Log($"Listed {children.Count(c => !c.IsMessage)} version(s).");
+                        break;
+                    }
+
+                    case BuildRepoNodeKind.Version when node.IsDocumentation:
+                    {
+                        // Documentation view: the version's Commodity / Checklist folders (siblings of "Build").
+                        var items = await ListCachedAsync(node.DriveId, ct);
+                        children = FindDocumentationFolders(items)
+                            .Select(i => new BuildRepoNode(BuildRepoNodeKind.DocFolder, i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
+                            .ToList();
+                        if (children.Count == 0)
+                        {
+                            var seen = items.Count == 0 ? "the folder looks empty" : "saw: " + string.Join(", ", items.Select(i => i.Name).Take(8));
+                            children.Add(Message($"No {string.Join(" or ", BuildRepoDefaults.DocumentationFolderNames)} folder in {node.Name} ({seen}).", node));
+                        }
                         break;
                     }
 
@@ -981,7 +1181,7 @@ namespace CommandCenter.ViewModel
                         var builds = await ListCachedAsync(buildFolder.Id, ct);
                         children = SortFoldersFirst(builds)
                             .Select(i => new BuildRepoNode(i.IsFolder ? BuildRepoNodeKind.Build : BuildRepoNodeKind.File,
-                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
+                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled) { MimeType = i.MimeType })
                             .ToList();
                         if (children.Count == 0) children.Add(Message("The Build folder is empty.", node));
                         break;
@@ -992,7 +1192,7 @@ namespace CommandCenter.ViewModel
                         var items = await ListCachedAsync(node.DriveId, ct);
                         children = SortFoldersFirst(items)
                             .Select(i => new BuildRepoNode(i.IsFolder ? BuildRepoNodeKind.Folder : BuildRepoNodeKind.File,
-                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled))
+                                i.Name, i.Id, node, LoadChildrenAsync, OnNodeSelected, OnBatchToggled) { MimeType = i.MimeType })
                             .ToList();
                         if (children.Count == 0) children.Add(Message("(empty)", node));
                         break;
@@ -1036,6 +1236,35 @@ namespace CommandCenter.ViewModel
                                       && string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase))
             ?? items.FirstOrDefault(i => string.Equals(i.Name.Trim(), BuildRepoDefaults.BuildFolderName, StringComparison.OrdinalIgnoreCase));
 
+        // Commodity / Checklist folders in a version folder, in DocumentationFolderNames order.
+        private static List<DriveItem> FindDocumentationFolders(List<DriveItem> items) =>
+            BuildRepoDefaults.DocumentationFolderNames
+                .Select(name => items.FirstOrDefault(i => i.IsFolder && string.Equals(i.Name.Trim(), name, StringComparison.OrdinalIgnoreCase)))
+                .Where(i => i != null)
+                .Select(i => i!)
+                .ToList();
+
+        /// <summary>Documentation view's version of VersionHasBuildDataAsync: any non-empty Commodity/Checklist folder.</summary>
+        private async Task<bool> VersionHasDocumentationAsync(DriveItem version, CancellationToken ct)
+        {
+            try
+            {
+                var items = await ListCachedAsync(version.Id, ct);
+                foreach (var folder in FindDocumentationFolders(items))
+                {
+                    if ((await ListCachedAsync(folder.Id, ct)).Count > 0) return true;
+                }
+                return false;
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (SignInRequiredException) { throw; }
+            catch (Exception ex)
+            {
+                Log($"Couldn't check {version.Name}'s documentation folders: {ex.Message}");
+                return true;
+            }
+        }
+
         /// <summary>
         /// True when the version's "Build" folder exists and has something in it. Listings are
         /// cached, so expanding the version afterwards costs nothing extra. If the check itself
@@ -1076,7 +1305,7 @@ namespace CommandCenter.ViewModel
             var ct = _browseCts.Token;
             try
             {
-                foreach (var folder in parent.Children.Where(c => c.Kind is BuildRepoNodeKind.Build or BuildRepoNodeKind.Folder).ToList())
+                foreach (var folder in parent.Children.Where(c => c.Kind is BuildRepoNodeKind.Build or BuildRepoNodeKind.DocFolder or BuildRepoNodeKind.Folder).ToList())
                 {
                     await ComputeFolderSizeAsync(folder, ct);
                 }
@@ -1139,6 +1368,12 @@ namespace CommandCenter.ViewModel
 
         private async Task DownloadSelectedAsync()
         {
+            if (IsDocumentsView)
+            {
+                await DownloadDocumentsAsync();
+                return;
+            }
+
             if (UseTransfer)
             {
                 await TransferBuildAsync();
@@ -1151,7 +1386,7 @@ namespace CommandCenter.ViewModel
                 return;
             }
 
-            if (IsBatchMode)
+            if (BatchActive)
             {
                 await DownloadBatchAsync(_batch.ToList());
                 return;
@@ -1479,6 +1714,186 @@ namespace CommandCenter.ViewModel
                 {
                     buildVm?.EndExternalUpdate(StatusText, succeeded: false);
                 }
+                End();
+            }
+        }
+
+        // ---------- Documentation download ----------
+
+        /// <summary>Where the selected documentation lands for the selected tab (null if nothing usable is selected).</summary>
+        private (string Path, bool IsCurrent, string Family)? CurrentDocumentsDestination()
+        {
+            var node = IsDocBatchMode ? _docBatch[0] : SelectedNode;
+            var target = SelectedTarget;
+            if (!IsDocumentsView || node == null || !node.CanDownload || target == null || !target.HasBuildPath) return null;
+            return DocumentsDestinationFor(target, node);
+        }
+
+        /// <summary>
+        /// The target tab's Documents folder for the version the documentation came from - the same
+        /// sibling-of-the-build-folder "&lt;family&gt; Documents" folder the tab's own Documents panel uses
+        /// (DocumentsService). IsCurrent = it's the folder that panel is showing right now:
+        ///   - tab is on the same version family (271.x docs into a 271.x tab), or has no version yet,
+        ///     or is Live-capable (always one fixed "&lt;tab&gt; Documents" folder) -> the panel's own folder;
+        ///   - tab is on a different family (272 docs into a 271 tab) -> "272 Documents" next to the
+        ///     build folder, which the tab adopts automatically once its Version Number moves to 272.
+        /// </summary>
+        private (string Path, bool IsCurrent, string Family) DocumentsDestinationFor(BuildRepoTargetOption target, BuildRepoNode node)
+        {
+            var versionFolder = node.VersionAncestor?.Name;
+            var docVersion = string.IsNullOrWhiteSpace(versionFolder) ? null : BuildRepoDefaults.VersionNumberFromFolderName(versionFolder);
+            var docFamily = string.IsNullOrWhiteSpace(docVersion) ? string.Empty : DocumentsService.VersionFamily(docVersion);
+            var tabVersion = target.Settings.VersionNumber;
+            var tabFamily = string.IsNullOrWhiteSpace(tabVersion) ? string.Empty : DocumentsService.VersionFamily(tabVersion);
+
+            var buildVm = _findBuildSection(target.Id);
+            var sameFamily = docFamily.Length == 0 || tabFamily.Length == 0
+                             || string.Equals(docFamily, tabFamily, StringComparison.OrdinalIgnoreCase);
+
+            if (buildVm?.DocumentsFolderPath != null && (buildVm.SupportsPushedToLive || sameFamily))
+            {
+                return (buildVm.DocumentsFolderPath, true, docFamily);
+            }
+
+            var folderName = docFamily.Length > 0
+                ? DocumentsService.VersionedFolderName(docVersion!)
+                : DocumentsService.FallbackFolderName(target.Title);
+            var path = DocumentsService.FolderPathFor(target.BuildPath, folderName) ?? Path.Combine(target.BuildPath, folderName);
+            return (path, false, docFamily);
+        }
+
+        /// <summary>
+        /// Documentation view's Download: fetches the selected Commodity/Checklist folder (or anything
+        /// inside one) straight into the target tab's Documents folder for that version, keeping the
+        /// Drive structure under a "Commodity"/"Checklist" subfolder. No staging, no extract.
+        /// Native Google Docs/Sheets/Slides are exported as .docx/.xlsx/.pptx.
+        /// </summary>
+        private async Task DownloadDocumentsAsync()
+        {
+            // Batch (ticked items) wins over the highlighted row, same as the Builds view.
+            var nodes = IsDocBatchMode
+                ? _docBatch.ToList()
+                : SelectedNode is { CanDownload: true, DriveId: not null } sel ? new List<BuildRepoNode> { sel } : new List<BuildRepoNode>();
+            var target = SelectedTarget;
+            if (nodes.Count == 0 || target == null || !target.HasBuildPath) return;
+
+            var label = nodes.Count == 1 ? nodes[0].Name : $"{nodes.Count} items from {nodes[0].VersionAncestor?.Name}";
+            var (docsFolder, isCurrent, family) = DocumentsDestinationFor(target, nodes[0]);
+            var ct = Begin($"Listing files in {label}...", indeterminate: true);
+            ClearLog();
+            foreach (var n in nodes) Log($"Selected: {n.Breadcrumb}");
+            Log($"Target tab: {target.Title}  -> Documents: {docsFolder}");
+
+            try
+            {
+                // A single file lands straight in the version's Documents folder - no Commodity/Checklist
+                // (or any parent) folder is created for it. A folder keeps just its own name ("Checklist",
+                // or "Week 1" for Checklist\Week 1) with its contents inside.
+                var files = new List<(DriveItem Item, string RelativePath)>();
+                foreach (var node in nodes)
+                {
+                    if (node.Kind == BuildRepoNodeKind.File)
+                    {
+                        files.Add((new DriveItem(node.DriveId!, node.Name, false, false, node.MimeType),
+                            BuildRepoDefaults.MakeSafeFileName(node.Name)));
+                    }
+                    else
+                    {
+                        await CollectFilesAsync(node.DriveId!, BuildRepoDefaults.MakeSafeFileName(node.Name), files, ct, depth: 0);
+                    }
+                }
+
+                var skipped = files.Where(f => BuildRepoDefaults.IsUnexportableGoogleType(f.Item.MimeType)).ToList();
+                files = files.Except(skipped).ToList();
+                foreach (var s in skipped) Log($"  - skipped {s.RelativePath} (Google {s.Item.MimeType?.Split('.').Last()} - can't be exported)");
+
+                if (files.Count == 0)
+                {
+                    StatusText = $"{label} has no files to download.";
+                    return;
+                }
+
+                Log($"Found {files.Count} file(s).");
+
+                var where = isCurrent
+                    ? $"{target.Title}'s Documents folder:\n{docsFolder}"
+                    : $"{target.Title}'s {family} Documents folder:\n{docsFolder}\n\n" +
+                      $"{target.Title} is on {target.VersionText} right now, so these won't show in its Documents panel until its Version Number moves to {family}.";
+                var confirm = $"Download {files.Count} file(s) from {label} into {where}\n\nExisting files with the same names will be overwritten.\n\nContinue?";
+                if (ScrollableMessageBox.Show(confirm, "Confirm Documents Download", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                {
+                    StatusText = "Download cancelled.";
+                    return;
+                }
+
+                DocumentsService.EnsureFolder(docsFolder);
+                IsProgressIndeterminate = false;
+                var used = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                for (int i = 0; i < files.Count; i++)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var (item, relative) = files[i];
+                    var export = BuildRepoDefaults.GoogleExportFor(item.MimeType, item.Id);
+                    if (export != null && !relative.EndsWith(export.Value.Extension, StringComparison.OrdinalIgnoreCase))
+                    {
+                        relative += export.Value.Extension;
+                    }
+
+                    var destination = UniquePath(Path.Combine(docsFolder, relative), used);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                    int index = i;
+                    int fileNumber = i + 1;
+                    var name = Path.GetFileName(destination);
+                    StatusText = $"Downloading {fileNumber} of {files.Count}: {name}...";
+
+                    if (export != null)
+                    {
+                        await _session.DownloadAsync(export.Value.Url, destination, ct);
+                    }
+                    else
+                    {
+                        var progress = new Progress<DriveDownloadProgress>(p =>
+                        {
+                            double fraction = p.TotalBytes is > 0 ? (double)p.BytesReceived / p.TotalBytes.Value : 0;
+                            ProgressPercent = (index + fraction) / files.Count * 100.0;
+                            StatusText = $"Downloading {fileNumber} of {files.Count}: {name} - {FormatBytes(p.BytesReceived)}";
+                        });
+                        await DownloadFileWithResumeAsync(item.Id, destination, fileNumber, files.Count, progress, ct);
+                    }
+
+                    ProgressPercent = (i + 1.0) / files.Count * 100.0;
+                    Log($"  ✓ {relative}{(export != null ? "  (exported)" : "")}  ({FormatBytes(new FileInfo(destination).Length)})");
+                }
+
+                NeedsSignIn = false;
+                ProgressPercent = 100;
+                if (isCurrent) _findBuildSection(target.Id)?.RefreshDocuments();
+                StatusText = isCurrent
+                    ? $"Downloaded {files.Count} file(s) from {label} into {target.Title}'s Documents."
+                    : $"Downloaded {files.Count} file(s) from {label} into {target.Title}'s {family} Documents folder.";
+                Log("Done.");
+                if (IsDocBatchMode) ClearDocBatch();
+            }
+            catch (SignInRequiredException)
+            {
+                NeedsSignIn = true;
+                StatusText = "Google sign-in required - sign in, then try the download again.";
+                Log("Stopped: Google sign-in required.");
+            }
+            catch (OperationCanceledException)
+            {
+                StatusText = "Download cancelled. Files that finished are kept in the Documents folder.";
+                Log("Cancelled.");
+            }
+            catch (Exception ex)
+            {
+                StatusText = $"Failed: {ex.Message}";
+                Log($"Failed: {ex.Message}");
+                ScrollableMessageBox.Show(ex.Message, "Build Repo", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
                 End();
             }
         }

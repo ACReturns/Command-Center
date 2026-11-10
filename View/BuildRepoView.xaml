@@ -100,6 +100,91 @@
                 </DataTrigger>
             </Style.Triggers>
         </Style>
+
+        <!-- Builds / Documentation switch above the tree: flat tabs with an underline on the active one -->
+        <Style x:Key="ViewTab" TargetType="RadioButton">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Margin" Value="0,0,4,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="Bd" Padding="14,5" CornerRadius="4,4,0,0" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="0,0,0,3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#FFEFF5FB"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#FF3D85C6"/>
+                                <Setter TargetName="Bd" Property="Background" Value="#FFE3EEF9"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+            <HierarchicalDataTemplate x:Key="RepoNodeTemplate" DataType="{x:Type vm:BuildRepoNode}" ItemsSource="{Binding Children}">
+                <StackPanel Orientation="Horizontal">
+                    <!-- Builds: Full/Partial folders, tick several from one build to apply in order. Documentation: any folder/file, several from one version. -->
+                    <CheckBox IsChecked="{Binding IsBatchChecked, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,6,0"
+                              Focusable="False"
+                              ToolTip="{Binding BatchToolTip}"
+                              IsEnabled="{Binding DataContext.IsNotBusy, RelativeSource={RelativeSource AncestorType=TreeView}}"
+                              Visibility="{Binding IsBatchEligible, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock x:Name="Glyph" Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"
+                               VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#FF3D85C6"/>
+                    <TextBlock x:Name="NameText" Text="{Binding Name}" VerticalAlignment="Center"/>
+                    <!-- Full = New Build (red), Partial = Patch (blue). When the "Patch" option is on, Full is
+                         overlaid instead of replacing the build, so its tag flips to Patch to match. -->
+                    <Border x:Name="ModeTag" CornerRadius="3" Padding="5,0" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Background="#FF3D85C6" Visibility="{Binding HasModeTag, Converter={StaticResource BoolToVis}}">
+                        <TextBlock x:Name="ModeTagText" Text="Patch" Foreground="White" FontSize="11"/>
+                    </Border>
+                    <TextBlock Text="{Binding SizeText}" Margin="10,0,0,0" Foreground="#FF666666" FontSize="11" VerticalAlignment="Center"/>
+                    <TextBlock Text="  loading..." Opacity="0.6" FontStyle="Italic" VerticalAlignment="Center"
+                               Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"/>
+                </StackPanel>
+                <HierarchicalDataTemplate.Triggers>
+                    <DataTrigger Binding="{Binding Kind}" Value="Root">
+                        <Setter TargetName="NameText" Property="FontWeight" Value="Bold"/>
+                        <Setter TargetName="NameText" Property="FontSize" Value="14"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Kind}" Value="Version">
+                        <Setter TargetName="NameText" Property="FontWeight" Value="SemiBold"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Kind}" Value="DocFolder">
+                    <Setter TargetName="NameText" Property="FontWeight" Value="SemiBold"/>
+                    <Setter TargetName="Glyph" Property="Foreground" Value="#FF8E5BB5"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding Kind}" Value="Build">
+                        <Setter TargetName="NameText" Property="FontWeight" Value="SemiBold"/>
+                        <Setter TargetName="Glyph" Property="Foreground" Value="#FF1E7B34"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Kind}" Value="File">
+                        <Setter TargetName="Glyph" Property="Foreground" Value="#FF666666"/>
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Kind}" Value="Message">
+                        <Setter TargetName="NameText" Property="FontStyle" Value="Italic"/>
+                        <Setter TargetName="NameText" Property="Opacity" Value="0.7"/>
+                    </DataTrigger>
+                    <MultiDataTrigger>
+                        <MultiDataTrigger.Conditions>
+                            <Condition Binding="{Binding IsFullItem}" Value="True"/>
+                            <Condition Binding="{Binding DataContext.PatchAfterDownload, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False"/>
+                        </MultiDataTrigger.Conditions>
+                        <Setter TargetName="ModeTag" Property="Background" Value="#FFB3261E"/>
+                        <Setter TargetName="ModeTagText" Property="Text" Value="New Build"/>
+                    </MultiDataTrigger>
+                </HierarchicalDataTemplate.Triggers>
+            </HierarchicalDataTemplate>
     </UserControl.Resources>
 
     <!-- Auto-fit: the grid fills the visible area (Height = viewport), but never shrinks below what
@@ -123,69 +208,46 @@
             </StackPanel>
             <StackPanel VerticalAlignment="Center">
                 <TextBlock Text="Build Repo" FontSize="16" FontWeight="Bold"/>
-                <TextBlock Opacity="0.75" TextWrapping="Wrap"
-                           Text="Click (+) on a version to see its builds, and (+) on a build to see what's inside. Select a build, folder or file to download it - or tick several Full/Partial folders in one build to batch them (Full is applied first)."/>
+                <TextBlock Opacity="0.75" TextWrapping="Wrap" Text="{Binding HeaderHint}"/>
+                <!-- Builds = Build folder per version (as before). Documentation = each version's Commodity/Checklist
+                     folders; downloads go into the target tab's Documents for that version. -->
+                <Border BorderBrush="#33000000" BorderThickness="0,0,0,1" Margin="0,8,0,0">
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton GroupName="RepoView" Style="{StaticResource ViewTab}" IsChecked="{Binding IsBuildsView, Mode=TwoWay}"
+                                     IsEnabled="{Binding IsNotBusy}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE7B8;" FontFamily="Segoe MDL2 Assets" Foreground="#FF1E7B34" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Text="Builds" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                        <RadioButton GroupName="RepoView" Style="{StaticResource ViewTab}" IsChecked="{Binding IsDocumentsView, Mode=TwoWay}"
+                                     IsEnabled="{Binding IsNotBusy}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE9D5;" FontFamily="Segoe MDL2 Assets" Foreground="#FF8E5BB5" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <TextBlock Text="Documentation" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </RadioButton>
+                    </StackPanel>
+                </Border>
             </StackPanel>
         </DockPanel>
 
-        <!-- Repo tree: MapleStory (GMS) > version > builds (from each version's Build folder) > contents -->
+        <!-- Repo trees. Builds: MapleStory (GMS) > version > builds (from each version's Build folder) > contents.
+             Documentation: MapleStory (GMS) > version > Commodity / Checklist > contents. Two separate trees so
+             each keeps its own expanded rows and selection when switching. -->
         <Border Grid.Row="1" BorderBrush="#33000000" BorderThickness="1" CornerRadius="4">
-            <TreeView ItemsSource="{Binding RootNodes}"
-                      ItemContainerStyle="{StaticResource RepoTreeItem}"
-                      BorderThickness="0" Padding="4">
-                <TreeView.ItemTemplate>
-                    <HierarchicalDataTemplate DataType="{x:Type vm:BuildRepoNode}" ItemsSource="{Binding Children}">
-                        <StackPanel Orientation="Horizontal">
-                            <!-- Full/Partial folders only: tick several from the same build to download + apply them together, in order -->
-                            <CheckBox IsChecked="{Binding IsBatchChecked, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,6,0"
-                                      Focusable="False"
-                                      ToolTip="Add to batch - tick several Full/Partial folders from the same build to download and apply them in order (Full first)"
-                                      IsEnabled="{Binding DataContext.IsNotBusy, RelativeSource={RelativeSource AncestorType=TreeView}}"
-                                      Visibility="{Binding IsBatchEligible, Converter={StaticResource BoolToVis}}"/>
-                            <TextBlock x:Name="Glyph" Text="{Binding Glyph}" FontFamily="Segoe MDL2 Assets" FontSize="14"
-                                       VerticalAlignment="Center" Margin="0,0,6,0" Foreground="#FF3D85C6"/>
-                            <TextBlock x:Name="NameText" Text="{Binding Name}" VerticalAlignment="Center"/>
-                            <!-- Full = New Build (red), Partial = Patch (blue). When the "Patch" option is on, Full is
-                                 overlaid instead of replacing the build, so its tag flips to Patch to match. -->
-                            <Border x:Name="ModeTag" CornerRadius="3" Padding="5,0" Margin="8,0,0,0" VerticalAlignment="Center"
-                                    Background="#FF3D85C6" Visibility="{Binding HasModeTag, Converter={StaticResource BoolToVis}}">
-                                <TextBlock x:Name="ModeTagText" Text="Patch" Foreground="White" FontSize="11"/>
-                            </Border>
-                            <TextBlock Text="{Binding SizeText}" Margin="10,0,0,0" Foreground="#FF666666" FontSize="11" VerticalAlignment="Center"/>
-                            <TextBlock Text="  loading..." Opacity="0.6" FontStyle="Italic" VerticalAlignment="Center"
-                                       Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"/>
-                        </StackPanel>
-                        <HierarchicalDataTemplate.Triggers>
-                            <DataTrigger Binding="{Binding Kind}" Value="Root">
-                                <Setter TargetName="NameText" Property="FontWeight" Value="Bold"/>
-                                <Setter TargetName="NameText" Property="FontSize" Value="14"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding Kind}" Value="Version">
-                                <Setter TargetName="NameText" Property="FontWeight" Value="SemiBold"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding Kind}" Value="Build">
-                                <Setter TargetName="NameText" Property="FontWeight" Value="SemiBold"/>
-                                <Setter TargetName="Glyph" Property="Foreground" Value="#FF1E7B34"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding Kind}" Value="File">
-                                <Setter TargetName="Glyph" Property="Foreground" Value="#FF666666"/>
-                            </DataTrigger>
-                            <DataTrigger Binding="{Binding Kind}" Value="Message">
-                                <Setter TargetName="NameText" Property="FontStyle" Value="Italic"/>
-                                <Setter TargetName="NameText" Property="Opacity" Value="0.7"/>
-                            </DataTrigger>
-                            <MultiDataTrigger>
-                                <MultiDataTrigger.Conditions>
-                                    <Condition Binding="{Binding IsFullItem}" Value="True"/>
-                                    <Condition Binding="{Binding DataContext.PatchAfterDownload, RelativeSource={RelativeSource AncestorType=TreeView}}" Value="False"/>
-                                </MultiDataTrigger.Conditions>
-                                <Setter TargetName="ModeTag" Property="Background" Value="#FFB3261E"/>
-                                <Setter TargetName="ModeTagText" Property="Text" Value="New Build"/>
-                            </MultiDataTrigger>
-                        </HierarchicalDataTemplate.Triggers>
-                    </HierarchicalDataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
+            <Grid>
+                <TreeView ItemsSource="{Binding RootNodes}"
+                          ItemContainerStyle="{StaticResource RepoTreeItem}"
+                          ItemTemplate="{StaticResource RepoNodeTemplate}"
+                          BorderThickness="0" Padding="4"
+                          Visibility="{Binding IsBuildsView, Converter={StaticResource BoolToVis}}"/>
+                <TreeView ItemsSource="{Binding DocRootNodes}"
+                          ItemContainerStyle="{StaticResource RepoTreeItem}"
+                          ItemTemplate="{StaticResource RepoNodeTemplate}"
+                          BorderThickness="0" Padding="4"
+                          Visibility="{Binding IsDocumentsView, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
         </Border>
 
         <!-- Download panel -->
@@ -207,26 +269,27 @@
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Selected:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"/>
                 <DockPanel Grid.Row="0" Grid.Column="1" Margin="0,0,0,6">
                     <Button DockPanel.Dock="Right" Content="Clear Batch" Command="{Binding ClearBatchCommand}" Padding="10,3" Margin="8,0,0,0"
-                            VerticalAlignment="Center" Visibility="{Binding IsBatchMode, Converter={StaticResource BoolToVis}}"/>
+                            VerticalAlignment="Center" Visibility="{Binding ShowClearBatch, Converter={StaticResource BoolToVis}}"/>
                     <TextBlock Text="{Binding SelectionText}" TextWrapping="Wrap" VerticalAlignment="Center"/>
                 </DockPanel>
 
                 <!-- Rows 1-2 (target tab + its directory) are hidden in Transfer Build mode, which has its
-                     own Source/Target pickers below. -->
+                     own Source/Target pickers below. Always shown in the Documentation view, where row 2 is
+                     the tab's Documents folder for the selected version instead of its build folder. -->
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Download for tab:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"
-                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}"/>
+                           Visibility="{Binding ShowTargetRows, Converter={StaticResource BoolToVis}}"/>
                 <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,6"
-                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}">
-                    <Button DockPanel.Dock="Right" Content="Open Build Folder" Command="{Binding OpenBuildFolderCommand}" Padding="10,3" Margin="8,0,0,0"/>
+                           Visibility="{Binding ShowTargetRows, Converter={StaticResource BoolToVis}}">
+                    <Button DockPanel.Dock="Right" Content="{Binding OpenFolderButtonText}" Command="{Binding OpenBuildFolderCommand}" Padding="10,3" Margin="8,0,0,0"/>
                     <ComboBox ItemsSource="{Binding Targets}" SelectedItem="{Binding SelectedTarget, Mode=TwoWay}"
                               DisplayMemberPath="Title" MinWidth="220" HorizontalAlignment="Left"
                               IsEnabled="{Binding IsNotBusy}"/>
                 </DockPanel>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Current Build directory:" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"
-                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="{Binding TargetPathLabel}" FontWeight="SemiBold" Margin="0,0,10,6" VerticalAlignment="Center"
+                           Visibility="{Binding ShowTargetRows, Converter={StaticResource BoolToVis}}"/>
                 <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding TargetBuildPathText}" TextWrapping="Wrap" Margin="0,0,0,6" VerticalAlignment="Center"
-                           Visibility="{Binding IsNotTransferMode, Converter={StaticResource BoolToVis}}">
+                           Visibility="{Binding ShowTargetRows, Converter={StaticResource BoolToVis}}">
                     <TextBlock.Style>
                         <Style TargetType="TextBlock">
                             <Style.Triggers>
@@ -238,8 +301,14 @@
                     </TextBlock.Style>
                 </TextBlock>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="After download:" FontWeight="SemiBold" Margin="0,2,10,8" VerticalAlignment="Top"/>
-                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,2,0,8">
+                <!-- Row 3: Builds view only - documentation is just downloaded, never extracted. -->
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="After download:" FontWeight="SemiBold" Margin="0,2,10,8" VerticalAlignment="Top"
+                           Visibility="{Binding IsBuildsView, Converter={StaticResource BoolToVis}}"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,2,0,8" TextWrapping="Wrap" Foreground="#FF666666" FontStyle="Italic"
+                           Visibility="{Binding IsDocumentsView, Converter={StaticResource BoolToVis}}"
+                           Text="Files are downloaded as-is into the folder above (Google Docs/Sheets/Slides are saved as .docx/.xlsx/.pptx). A single file goes straight into the folder; a folder keeps its own name with its contents inside. Tick several items from one version to download them together. Nothing is extracted, and the build folder isn't touched."/>
+                <StackPanel Grid.Row="3" Grid.Column="1" Margin="0,2,0,8"
+                            Visibility="{Binding IsBuildsView, Converter={StaticResource BoolToVis}}">
                     <!-- The two are exclusive (checking one unchecks the other in the view model); none checked = plain download.
                          Collapsed while Local Files is on (their values are kept). -->
                     <StackPanel Visibility="{Binding IsNotLocalMode, Converter={StaticResource BoolToVis}}">

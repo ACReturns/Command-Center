@@ -30,7 +30,7 @@ namespace CommandCenter.Services
     /// Drive's own mimeType when it was available (the folder page's embedded _DRIVE_ivd data), and
     /// otherwise from a "name has no file extension" guess (see ListFolderItemsAsync).
     /// </summary>
-    public sealed record DriveItem(string Id, string Name, bool IsFolder, bool TypeIsGuessed);
+    public sealed record DriveItem(string Id, string Name, bool IsFolder, bool TypeIsGuessed, string? MimeType = null);
 
     /// <summary>Bytes received so far + total (null when Drive didn't send a length).</summary>
     public readonly record struct DriveDownloadProgress(long BytesReceived, long? TotalBytes);
@@ -420,6 +420,36 @@ namespace CommandCenter.Services
     return JSON.stringify({ ivd: ivdFound, items: Array.from(out.values()) });
 })()";
 
+        // Drive only puts the FIRST chunk of a folder's children into _DRIVE_ivd / the initial DOM -
+        // the rest lazy-load as the list is scrolled. Which chunk you get depends on the signed-in
+        // account's own Drive sort order (per-user), which is why some users only saw up to v250 while
+        // others saw everything. This scrolls the list's scroll container (found by walking up from
+        // the first row) to the bottom so Drive loads the next chunk. Returns whether there's any
+        // scrollable list at all, and whether it was already at the bottom before this scroll.
+        private const string ScrollFolderListScript = @"
+(() => {
+    const row = document.querySelector('div[role=""row""][data-id]');
+    let el = row ? row.parentElement : null;
+    while (el && el !== document.body) {
+        const s = getComputedStyle(el);
+        if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 1) break;
+        el = el.parentElement;
+    }
+    if (!el || el === document.body) {
+        el = document.scrollingElement || document.documentElement;
+    }
+    const scrollable = el.scrollHeight > el.clientHeight + 1;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+    el.scrollTop = el.scrollHeight;
+    el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    return JSON.stringify({ scrollable: scrollable, atBottom: atBottom });
+})()";
+
+        // Safety caps for the scroll-to-load loop (a few hundred version folders is ~10-20 passes).
+        private const int MaxScrollPasses = 80;
+        private const int ScrollSettleMs = 500;
+        private const int IdlePassesBeforeDone = 3;
+
         private const string FolderMimeType = "application/vnd.google-apps.folder";
 
         private GoogleWebSession() { }
@@ -710,20 +740,62 @@ namespace CommandCenter.Services
                 // NavigationCompleted - but the DOM rows (fallback/merge source) render a bit later,
                 // and an empty folder legitimately has neither. Poll a few times: stop as soon as
                 // _DRIVE_ivd has been read (authoritative, even when it says "empty"), or rows appear.
-                List<DriveItem> items = new();
+                // Merged across every read, keyed by id. Entries with a real mimeType (from
+                // _DRIVE_ivd) win over DOM-only guessed ones.
+                var merged = new Dictionary<string, DriveItem>(StringComparer.Ordinal);
+                var order = new List<string>();
+                void Merge(List<DriveItem> batch)
+                {
+                    foreach (var item in batch)
+                    {
+                        if (merged.TryGetValue(item.Id, out var existing))
+                        {
+                            if (existing.TypeIsGuessed && !item.TypeIsGuessed) merged[item.Id] = item;
+                        }
+                        else
+                        {
+                            merged[item.Id] = item;
+                            order.Add(item.Id);
+                        }
+                    }
+                }
+
                 for (var attempt = 0; attempt < 10; attempt++)
                 {
                     ct.ThrowIfCancellationRequested();
 
                     var (ivdFound, parsed) = ParseFolderItems(await web.ExecuteScriptAsync(ListFolderItemsScript));
-                    items = parsed;
+                    Merge(parsed);
                     if (ivdFound && attempt >= 2) break; // give the DOM a moment to add anything ivd missed
-                    if (!ivdFound && items.Count > 0) break;
+                    if (!ivdFound && merged.Count > 0) break;
 
                     await Task.Delay(400, ct);
                 }
 
-                return items;
+                // Scroll-to-load: keep scrolling the list and merging rows until several passes in a
+                // row add nothing new while already at the bottom. Rows Drive recycles out of the DOM
+                // while scrolling are fine - they're already in `merged`.
+                if (merged.Count > 0)
+                {
+                    var idlePasses = 0;
+                    for (var pass = 0; pass < MaxScrollPasses && idlePasses < IdlePassesBeforeDone; pass++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+
+                        var (scrollable, wasAtBottom) = ParseScrollResult(await web.ExecuteScriptAsync(ScrollFolderListScript));
+                        if (!scrollable) break; // everything already fits on screen - nothing more to load
+
+                        await Task.Delay(ScrollSettleMs, ct);
+
+                        var before = merged.Count;
+                        var (_, parsed) = ParseFolderItems(await web.ExecuteScriptAsync(ListFolderItemsScript));
+                        Merge(parsed);
+
+                        idlePasses = (merged.Count == before && wasAtBottom) ? idlePasses + 1 : 0;
+                    }
+                }
+
+                return order.Select(id => merged[id]).ToList();
             }
             finally
             {
@@ -733,6 +805,23 @@ namespace CommandCenter.Services
                 }
 
                 _gate.Release();
+            }
+        }
+
+        private static (bool Scrollable, bool AtBottom) ParseScrollResult(string json)
+        {
+            try
+            {
+                var inner = JsonSerializer.Deserialize<string>(json) ?? "{}";
+                using var doc = JsonDocument.Parse(inner);
+                var root = doc.RootElement;
+                var scrollable = root.TryGetProperty("scrollable", out var s) && s.ValueKind == JsonValueKind.True;
+                var atBottom = root.TryGetProperty("atBottom", out var b) && b.ValueKind == JsonValueKind.True;
+                return (scrollable, atBottom);
+            }
+            catch (JsonException)
+            {
+                return (false, true);
             }
         }
 
@@ -758,7 +847,7 @@ namespace CommandCenter.Services
 
                     if (!string.IsNullOrEmpty(mime))
                     {
-                        items.Add(new DriveItem(id, name, mime == FolderMimeType, TypeIsGuessed: false));
+                        items.Add(new DriveItem(id, name, mime == FolderMimeType, TypeIsGuessed: false, MimeType: mime));
                     }
                     else
                     {
@@ -1014,6 +1103,9 @@ namespace CommandCenter.Services
 
             _hiddenController = await environment.CreateCoreWebView2ControllerAsync(hwnd);
             _hiddenController.IsVisible = false;
+            // Give the hidden page a real viewport. At the default 0x0, Drive's list has no visible
+            // area, so its scroll-to-load-more logic (used by ListFolderItemsAsync) may never fire.
+            _hiddenController.Bounds = new System.Drawing.Rectangle(0, 0, 1280, 1600);
             _hiddenController.CoreWebView2.Settings.AreDefaultScriptDialogsEnabled = false;
             return _hiddenController.CoreWebView2;
         }

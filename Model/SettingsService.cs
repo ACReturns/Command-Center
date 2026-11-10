@@ -37,6 +37,7 @@ namespace CommandCenter.Model
                 EnsureMaintenanceVerificationTab(settings);
                 EnsureBuildRepoTab(settings);
                 EnsureLauncherTab(settings);
+                EnsureEssentialTabsVisible(settings);
                 return settings;
             }
             catch (Exception)
@@ -52,23 +53,25 @@ namespace CommandCenter.Model
             File.WriteAllText(_settingsPath, json);
         }
 
-        // The 9 tabs every install starts with: GMS, CMS, Live Service Builds, Server Status,
-        // OpTool, Maintenance Verification, Build Repo, Launcher, Settings - all permanent, all visible, in that order.
+        // The 9 tabs every install starts with: Build Repo, Launcher, GMS, CMS, Live Service Builds,
+        // Server Status, OpTool, Maintenance Verification, Settings - all permanent, all visible, in that
+        // order. Build Repo and Launcher lead so a first-time user lands on them; they can still be
+        // reordered afterwards. Only affects fresh installs - existing settings.json orders are kept.
         private static AppSettings CreateDefaultSettings() => new AppSettings { Tabs = BuildDefaultPermanentTabs() };
 
         private static List<TabSettings> BuildDefaultPermanentTabs() => new()
         {
-            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Gms, IsPermanent = true, Title = "GMS", Order = 0,
+            new TabSettings { Kind = TabKind.BuildRepo, IsPermanent = true, Title = BuildRepoTabTitle, Order = 0 },
+            new TabSettings { Kind = TabKind.Launcher, IsPermanent = true, Title = LauncherTabTitle, Order = 1 },
+            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Gms, IsPermanent = true, Title = "GMS", Order = 2,
                 Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Gms).ToList() },
-            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Cms, IsPermanent = true, Title = "CMS", Order = 1,
+            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Cms, IsPermanent = true, Title = "CMS", Order = 3,
                 Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Cms).ToList() },
-            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Live, IsPermanent = true, Title = "Live Service Builds", Order = 2,
+            new TabSettings { Kind = TabKind.BuildSection, Category = SectionCategory.Live, IsPermanent = true, Title = "Live Service Builds", Order = 4,
                 SupportsPushedToLive = true, Servers = LaunchServerCatalog.BuiltInEntries(SectionCategory.Live).ToList() },
-            new TabSettings { Kind = TabKind.ServerStatus, IsPermanent = true, Title = "Server Status", Order = 3 },
-            new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = 4 },
-            new TabSettings { Kind = TabKind.MaintenanceVerification, IsPermanent = true, Title = MaintenanceVerificationTabTitle, Order = 5 },
-            new TabSettings { Kind = TabKind.BuildRepo, IsPermanent = true, Title = BuildRepoTabTitle, Order = 6 },
-            new TabSettings { Kind = TabKind.Launcher, IsPermanent = true, Title = LauncherTabTitle, Order = 7 },
+            new TabSettings { Kind = TabKind.ServerStatus, IsPermanent = true, Title = "Server Status", Order = 5 },
+            new TabSettings { Kind = TabKind.OpTool, IsPermanent = true, Title = OpToolTabTitle, Order = 6 },
+            new TabSettings { Kind = TabKind.MaintenanceVerification, IsPermanent = true, Title = MaintenanceVerificationTabTitle, Order = 7 },
             new TabSettings { Kind = TabKind.Settings, IsPermanent = true, Title = "Settings", Order = 8 },
         };
 
@@ -188,6 +191,20 @@ namespace CommandCenter.Model
                 IsVisible = true,
                 Order = order
             });
+        }
+
+        // Settings, Build Repo and Launcher can't be hidden anymore (see DraftTabViewModel.IsEssential).
+        // A settings.json saved while Build Repo/Launcher were still hideable could have them hidden,
+        // which would now leave them stuck that way with a disabled checkbox - so force them back on.
+        private static void EnsureEssentialTabsVisible(AppSettings settings)
+        {
+            foreach (var tab in settings.Tabs)
+            {
+                if (tab.Kind == TabKind.Settings || tab.Kind == TabKind.BuildRepo || tab.Kind == TabKind.Launcher)
+                {
+                    tab.IsVisible = true;
+                }
+            }
         }
 
         // Backfills TabSettings.Servers for every BuildSection tab in a settings.json saved before

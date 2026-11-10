@@ -304,7 +304,8 @@ namespace CommandCenter.ViewModel
                 // regardless of whatever the draft's checkbox says. Build tabs no longer have a
                 // visibility toggle (they're never in the main tab strip), so they're just left
                 // true rather than carrying a stale hidden flag from an older settings.json.
-                bool isVisible = draft.Kind == TabKind.Settings || draft.IsBuildSection ? true : draft.IsVisible;
+                // Build Repo and Launcher get the same treatment as Settings (see DraftTabViewModel.IsEssential).
+                bool isVisible = draft.IsEssential || draft.IsBuildSection ? true : draft.IsVisible;
 
                 if (liveById.TryGetValue(draft.Id, out var live))
                 {

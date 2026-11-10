@@ -15,7 +15,7 @@
          Bump MapleCentralBuildNumber for every release you upload to Confluence; the date part
          is filled in automatically at build time. The updater compares this BuildDate (read out
          of the .7z's MapleCentral.dll) against the running one. -->
-    <MapleCentralBuildNumber>01</MapleCentralBuildNumber>
+    <MapleCentralBuildNumber>06</MapleCentralBuildNumber>
     <MapleCentralBuildDate>$([System.DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss'))</MapleCentralBuildDate>
     <Version>$([System.DateTime]::Now.ToString('yyyy.M.d'))</Version>
     <InformationalVersion>ADW-MC-$(MapleCentralBuildNumber) ($([System.DateTime]::Now.ToString('yyyy.MM.dd')))</InformationalVersion>

@@ -19,6 +19,42 @@ namespace CommandCenter.Model
         public const string BuildFolderName = "Build";
 
         /// <summary>
+        /// Documentation folders that sit next to "Build" inside each version folder (Documentation view of the
+        /// Build Repo tab). Shown in this order; anything else in the version folder is ignored.
+        /// </summary>
+        public static readonly string[] DocumentationFolderNames = { "Commodity", "Checklist" };
+
+        /// <summary>
+        /// Native Google files (Docs/Sheets/Slides) can't be fetched with the normal download endpoint -
+        /// they have to be exported. Returns the export URL and the extension to save with, or null for
+        /// anything that downloads normally (or a Google type there's no sensible export for).
+        /// </summary>
+        public static (string Url, string Extension)? GoogleExportFor(string? mimeType, string fileId)
+        {
+            if (string.IsNullOrEmpty(mimeType) || !mimeType.StartsWith("application/vnd.google-apps.", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var id = Uri.EscapeDataString(fileId);
+            return mimeType.Substring("application/vnd.google-apps.".Length).ToLowerInvariant() switch
+            {
+                "document" => ($"https://docs.google.com/document/d/{id}/export?format=docx", ".docx"),
+                "spreadsheet" => ($"https://docs.google.com/spreadsheets/d/{id}/export?format=xlsx", ".xlsx"),
+                "presentation" => ($"https://docs.google.com/presentation/d/{id}/export/pptx", ".pptx"),
+                "drawing" => ($"https://docs.google.com/drawings/d/{id}/export/png", ".png"),
+                _ => null
+            };
+        }
+
+        /// <summary>A native Google file type with no export (Forms, Sites, ...) - skipped when downloading.</summary>
+        public static bool IsUnexportableGoogleType(string? mimeType) =>
+            !string.IsNullOrEmpty(mimeType)
+            && mimeType.StartsWith("application/vnd.google-apps.", StringComparison.OrdinalIgnoreCase)
+            && !mimeType.EndsWith(".folder", StringComparison.OrdinalIgnoreCase)
+            && GoogleExportFor(mimeType, "x") == null;
+
+        /// <summary>
         /// Name of the staging folder every downloaded .zip/.7z lands in (and every file, when "Extract after download" is on). It sits NEXT TO the
         /// target tab's build folder (same drive, so no cross-drive copy), never inside it - a Full_*.zip
         /// runs as a New Build, which wipes the build folder first and would delete the downloads.

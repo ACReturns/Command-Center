@@ -133,8 +133,17 @@ namespace CommandCenter.ViewModel
         // Settings can never be hidden - it's the user's only way back into Settings, so taking
         // it away would lock them out. Build tabs don't get a Visible checkbox at all anymore -
         // they never appear in the main tab strip (see MainViewModel.TabsView) and are reached
-        // through the Launcher/Build Repo dropdowns instead. Every other app tab can be hidden.
-        public bool CanHide => Kind != TabKind.Settings && !IsBuildSection;
+        // through the Launcher/Build Repo dropdowns instead. Build Repo and Launcher are the same
+        // kind of essential as Settings - they're the only way to reach the build tabs - so they're
+        // locked visible too (see IsEssential). Every other app tab can be hidden.
+        public bool CanHide => !IsEssential && !IsBuildSection;
+
+        // Tabs that must always stay in the main tab strip. Keep in sync with SettingsViewModel.Save()
+        // (force-visible override) and SettingsService.EnsureEssentialTabsVisible (load-time fix).
+        public bool IsEssential => IsEssentialKind(Kind);
+
+        public static bool IsEssentialKind(TabKind kind) =>
+            kind == TabKind.Settings || kind == TabKind.BuildRepo || kind == TabKind.Launcher;
 
         // Whether SettingsView shows the Visible checkbox for this row at all.
         public bool ShowVisibilityToggle => !IsBuildSection;

@@ -1643,6 +1643,11 @@ namespace CommandCenter.ViewModel
             _uiDispatcher.BeginInvoke(new Action(RefreshDocumentsList));
         }
 
+        // Lets the Build Repo tab's Documentation view refresh this panel right after it downloads
+        // into this tab's Documents folder (the watcher would catch top-level changes anyway, this
+        // just makes it immediate).
+        public void RefreshDocuments() => RefreshDocumentsList();
+
         private void RefreshDocumentsList()
         {
             Documents.Clear();

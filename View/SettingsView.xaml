@@ -52,7 +52,8 @@
                             <CheckBox Content="Visible" DockPanel.Dock="Right" Margin="0,0,16,0" VerticalAlignment="Center"
                                       IsChecked="{Binding IsVisible}" IsEnabled="{Binding CanHide}"
                                       Visibility="{Binding ShowVisibilityToggle, Converter={StaticResource BoolToVis}}"
-                                      ToolTip="Settings can't be hidden - it's the only way back into this screen."/>
+                                      ToolTip="Settings, Build Repo and Launcher can't be hidden - they're essential to using the app."
+                                      ToolTipService.ShowOnDisabled="True"/>
                             <TextBox Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center" Margin="0,0,8,0"/>
                         </DockPanel>
 
