@@ -27,11 +27,15 @@ namespace CommandCenter.Services
         // Folder name for the "no build name set yet" fallback, e.g. "GMS Documents".
         public static string FallbackFolderName(string sectionTitle) => $"{sectionTitle} Documents";
 
-        // The "version family" a build/version name belongs to - everything before the first
-        // delimiter, e.g. "271" for both "271.0.2" and "271.0.3". Two versions in the same family
-        // share one Documents folder instead of getting a new one for every single version bump;
-        // a version with no delimiter at all (or an empty string) is its own family. Falls back to
-        // the whole string when there's no '.' to split on.
+        // The "version family" a build/version name belongs to - the leading run of letters/digits,
+        // stopping at the first delimiter of ANY kind ('.', space, '(', '-', '_', ...). So "271.0.2",
+        // "271.0.3", "272 (FTC)", "272 (FTC2 (Additional))" and "272 (3TC)" resolve to "271"/"272"
+        // respectively. Two versions in the same family share one Documents folder instead of
+        // getting a new one for every build/update in that release line.
+        //
+        // 2026-11-13: previously split on '.' only, so a version tagged with a suffix like
+        // "272 (FTC)" (no dot) was treated as its own family and spawned its own
+        // "272 (FTC) Documents" folder. See MergeStrayFamilyFolders for the cleanup of those.
         public static string VersionFamily(string versionNumber)
         {
             if (string.IsNullOrWhiteSpace(versionNumber))
@@ -40,8 +44,15 @@ namespace CommandCenter.Services
             }
 
             string trimmed = versionNumber.Trim();
-            int delimiterIndex = trimmed.IndexOf('.');
-            return delimiterIndex > 0 ? trimmed[..delimiterIndex] : trimmed;
+            int end = 0;
+            while (end < trimmed.Length && char.IsLetterOrDigit(trimmed[end]))
+            {
+                end++;
+            }
+
+            // Starts with a delimiter (nothing alphanumeric up front) - keep the whole string
+            // rather than collapsing every such version into one empty-named family.
+            return end > 0 ? trimmed[..end] : trimmed;
         }
 
         // Folder name once a build/version name has been set, keyed off the version FAMILY (see
@@ -110,6 +121,56 @@ namespace CommandCenter.Services
                 })
                 .OrderByDescending(Directory.GetLastWriteTimeUtc)
                 .FirstOrDefault();
+        }
+
+        // Folds every sibling "<version> Documents" folder that belongs to `family` but isn't the
+        // family folder itself (e.g. "272 (FTC) Documents", "272 (FTC2 (Additional)) Documents",
+        // "272.0.3 Documents") into `familyFolderPath` ("272 Documents"). Merges oldest-first so
+        // that if two folders hold a same-named file, the most recently modified folder's copy
+        // wins. Best-effort per folder, same as RenameFolder: anything that can't be moved
+        // (locked file, permissions) is left in place rather than lost. Returns how many folders
+        // were merged.
+        public static int MergeStrayFamilyFolders(string buildPath, string family, string familyFolderPath)
+        {
+            string? baseDir = BaseDirFor(buildPath);
+            if (baseDir == null || !Directory.Exists(baseDir) || string.IsNullOrEmpty(family))
+            {
+                return 0;
+            }
+
+            const string suffix = " Documents";
+
+            var strays = Directory.GetDirectories(baseDir)
+                .Where(dir =>
+                {
+                    if (string.Equals(dir.TrimEnd(Path.DirectorySeparatorChar), familyFolderPath.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    string name = Path.GetFileName(dir);
+                    if (!name.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    string versionPart = name[..^suffix.Length];
+                    return !string.Equals(versionPart, family, StringComparison.OrdinalIgnoreCase) &&
+                           string.Equals(VersionFamily(versionPart), family, StringComparison.OrdinalIgnoreCase);
+                })
+                .OrderBy(Directory.GetLastWriteTimeUtc)
+                .ToList();
+
+            int merged = 0;
+            foreach (var stray in strays)
+            {
+                if (TryRenameFolder(stray, familyFolderPath, out _))
+                {
+                    merged++;
+                }
+            }
+
+            return merged;
         }
 
         public static void EnsureFolder(string folderPath) => Directory.CreateDirectory(folderPath);

@@ -1586,6 +1586,15 @@ namespace CommandCenter.ViewModel
                 DocumentsService.RenameFolder(_documentsFolderPath, newPath);
             }
 
+            // Fold any stray same-family folders (e.g. "272 (FTC) Documents" left over from before
+            // VersionFamily stopped treating suffixed builds as their own family) into this one, so
+            // every build/update in a version line shares a single Documents folder. Not done for
+            // Live-capable tabs, which always use the plain fallback name (see DocumentsFolderLabel).
+            if (currentFamily != null && !SupportsPushedToLive)
+            {
+                DocumentsService.MergeStrayFamilyFolders(CurrentBuildPath, currentFamily, newPath);
+            }
+
             DocumentsService.EnsureFolder(newPath);
             _documentsFolderPath = newPath;
             _documentsFamily = currentFamily;

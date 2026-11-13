@@ -366,7 +366,7 @@ namespace CommandCenter.Services
         // FindManifestEntryAsync to pick the most recently modified subfolder when a Checksum folder
         // holds nothing but subfolders (e.g. "Part 1"/"Part 2" batches) instead of the .md5 itself.
         private const string ListFolderScriptAuthenticated = @"
-(() => JSON.stringify(Array.from(document.querySelectorAll('div[role=""row""][data-id]')).map(e => {
+(() => JSON.stringify(Array.from(document.querySelectorAll('[role=""row""][data-id]')).map(e => {
     const texts = Array.from(e.querySelectorAll('*'))
         .map(n => (n.textContent || '').trim())
         .filter(t => t.length > 0 && t.length < 200);
@@ -407,7 +407,7 @@ namespace CommandCenter.Services
     } catch (e) { }
     const junk = /^(me|owner|—|-|\d+(\.\d+)?\s*(bytes|KB|MB|GB|TB))$/i;
     const dateLike = /(\d{1,2}\/\d{1,2}\/\d{2,4})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-zA-Z]*\.?\s+\d{1,2}(,?\s+\d{4})?)|(\d{1,2}:\d{2}\s*(AM|PM)?)|(\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago)/i;
-    for (const row of document.querySelectorAll('div[role=""row""][data-id]')) {
+    for (const row of document.querySelectorAll('[role=""row""][data-id]')) {
         const id = row.getAttribute('data-id');
         if (!id || out.has(id)) continue;
         const leaves = Array.from(row.querySelectorAll('*'))
@@ -428,7 +428,7 @@ namespace CommandCenter.Services
         // scrollable list at all, and whether it was already at the bottom before this scroll.
         private const string ScrollFolderListScript = @"
 (() => {
-    const row = document.querySelector('div[role=""row""][data-id]');
+    const row = document.querySelector('[role=""row""][data-id]');
     let el = row ? row.parentElement : null;
     while (el && el !== document.body) {
         const s = getComputedStyle(el);
@@ -440,15 +440,83 @@ namespace CommandCenter.Services
     }
     const scrollable = el.scrollHeight > el.clientHeight + 1;
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
-    el.scrollTop = el.scrollHeight;
+    const rows = document.querySelectorAll('[role=""row""][data-id]');
+    // Step down roughly one screen at a time instead of jumping straight to the bottom: Drive's
+    // list is virtualized, and a single jump can skip past the point that triggers the next chunk.
+    el.scrollTop = Math.min(el.scrollHeight, el.scrollTop + Math.max(200, el.clientHeight * 0.9));
+    if (rows.length > 0) rows[rows.length - 1].scrollIntoView({ block: 'end' });
     el.dispatchEvent(new Event('scroll', { bubbles: true }));
+    el.dispatchEvent(new WheelEvent('wheel', { deltaY: el.clientHeight, bubbles: true }));
     return JSON.stringify({ scrollable: scrollable, atBottom: atBottom });
 })()";
 
+        // Cheap "has anything new rendered yet?" probe used while waiting after each scroll step.
+        private const string RowSignatureScript = @"
+(() => {
+    const rows = document.querySelectorAll('[role=""row""][data-id]');
+    const last = rows.length ? rows[rows.length - 1].getAttribute('data-id') : '';
+    return rows.length + '|' + last;
+})()";
+
+        // Current on-screen row names in display order, plus the Name column header's aria-sort when
+        // Drive exposes one. Used to check whether the folder is already sorted Name Z->A.
+        private const string SortStateScript = @"
+(() => {
+    const junk = /^(me|owner|—|-|\d+(\.\d+)?\s*(bytes|KB|MB|GB|TB))$/i;
+    const dateLike = /(\d{1,2}\/\d{1,2}\/\d{2,4})|((Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-zA-Z]*\.?\s+\d{1,2}(,?\s+\d{4})?)|(\d{1,2}:\d{2}\s*(AM|PM)?)|(\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago)/i;
+    const names = [];
+    for (const row of document.querySelectorAll('[role=""row""][data-id]')) {
+        const leaves = Array.from(row.querySelectorAll('*'))
+            .filter(n => n.children.length === 0)
+            .map(n => (n.textContent || '').trim())
+            .filter(t => t.length > 0 && t.length < 200 && !junk.test(t) && !dateLike.test(t));
+        const withExt = leaves.find(t => /\.[A-Za-z0-9]{2,5}$/.test(t));
+        const name = withExt || leaves[0] || '';
+        if (name) names.push(name);
+    }
+    const header = Array.from(document.querySelectorAll('[role=""columnheader""]'))
+        .find(h => /^name\b/i.test(((h.getAttribute('aria-label') || h.innerText || '') + '').trim()));
+    return JSON.stringify({ names: names, ariaSort: header ? (header.getAttribute('aria-sort') || '') : '' });
+})()";
+
+        // Clicks Drive's "Name" column header (toggles Name sort / its direction). Falls back to a
+        // "Reverse sort direction" control if there's no Name header. Drive listens for the full
+        // mouse sequence, not just click(), so all three events are sent.
+        private const string ClickNameSortScript = @"
+(() => {
+    const fire = el => {
+        for (const type of ['mousedown', 'mouseup', 'click']) {
+            el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window, button: 0 }));
+        }
+    };
+    const header = Array.from(document.querySelectorAll('[role=""columnheader""]'))
+        .find(h => /^name\b/i.test(((h.getAttribute('aria-label') || h.innerText || '') + '').trim()));
+    if (header) {
+        fire(header.querySelector('[role=""button""], button') || header);
+        return 'header';
+    }
+    const reverse = Array.from(document.querySelectorAll('[aria-label]'))
+        .find(e => /reverse sort direction|sort direction/i.test(e.getAttribute('aria-label') || ''));
+    if (reverse) {
+        fire(reverse);
+        return 'reverse';
+    }
+    return '';
+})()";
+
         // Safety caps for the scroll-to-load loop (a few hundred version folders is ~10-20 passes).
-        private const int MaxScrollPasses = 80;
-        private const int ScrollSettleMs = 500;
-        private const int IdlePassesBeforeDone = 3;
+        private const int MaxScrollPasses = 200;
+        private const int ScrollSettleMs = 500;          // minimum wait after each scroll step
+        private const int ScrollMaxWaitMs = 2500;        // ...extended while waiting for new rows to show up
+        private const int IdlePassesBeforeDone = 5;
+        private const int ScrollViewportHeight = 4000;   // taller viewport = more rows rendered per step
+
+        // Drive's sort order is an account-wide preference, so once it's set to Name Z->A it sticks
+        // (and every later _DRIVE_ivd first chunk already comes newest-first). Checked on every root
+        // listing (every Refresh) so it's put back if anything - Drive in a browser, another tool -
+        // changes it.
+        private const int MaxSortClicksPerListing = 3;
+        private const int SortRerenderTimeoutMs = 3000;
 
         private const string FolderMimeType = "application/vnd.google-apps.folder";
 
@@ -704,12 +772,13 @@ namespace CommandCenter.Services
         /// authenticated Drive folder page (works for folders shared only with specific accounts).
         /// Throws SignInRequiredException if Google redirects to a login page.
         /// </summary>
-        public async Task<List<DriveItem>> ListFolderItemsAsync(string folderId, CancellationToken ct)
+        public async Task<List<DriveItem>> ListFolderItemsAsync(string folderId, CancellationToken ct, bool enforceNewestFirst = false)
         {
             await _gate.WaitAsync(ct);
             CoreWebView2? web = null;
             var navigated = new TaskCompletionSource<CoreWebView2NavigationCompletedEventArgs>(TaskCreationOptions.RunContinuationsAsynchronously);
             void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e) => navigated.TrySetResult(e);
+            var revealedForScroll = false;
 
             try
             {
@@ -775,6 +844,29 @@ namespace CommandCenter.Services
                 // Scroll-to-load: keep scrolling the list and merging rows until several passes in a
                 // row add nothing new while already at the bottom. Rows Drive recycles out of the DOM
                 // while scrolling are fine - they're already in `merged`.
+                // A WebView2 with IsVisible=false is a "hidden" page to Chromium: Drive's load-more
+                // logic (scroll/intersection driven) never runs there, so scrolling alone did nothing.
+                // Mark it visible for the scroll phase but park it far outside the window's client area
+                // so nothing is ever drawn on screen; it goes back to hidden + parked in the finally.
+                if (merged.Count > 0 && _hiddenController != null)
+                {
+                    _hiddenController.Bounds = new System.Drawing.Rectangle(-20000, -20000, 1280, ScrollViewportHeight);
+                    _hiddenController.IsVisible = true;
+                    revealedForScroll = true;
+                    await Task.Delay(300, ct); // let the page pick up the visibility change
+                }
+
+                // Force Name Z->A so the first chunk Drive hands over is the newest versions (v271
+                // before v250). Done here, while the page is "visible", so Drive actually re-renders.
+                // Only for the Build Repo root (the version list): version numbers make the order
+                // unambiguous there. Subfolders aren't checked - guessing Drive's order from names like
+                // "Partial 1 10/28" was what flipped the sort back to A->Z on Refresh.
+                if (enforceNewestFirst && merged.Count > 1 && await EnsureNameDescendingAsync(web, ct))
+                {
+                    var (_, resorted) = ParseFolderItems(await web.ExecuteScriptAsync(ListFolderItemsScript));
+                    Merge(resorted);
+                }
+
                 if (merged.Count > 0)
                 {
                     var idlePasses = 0;
@@ -782,10 +874,18 @@ namespace CommandCenter.Services
                     {
                         ct.ThrowIfCancellationRequested();
 
+                        var signatureBefore = await web.ExecuteScriptAsync(RowSignatureScript);
                         var (scrollable, wasAtBottom) = ParseScrollResult(await web.ExecuteScriptAsync(ScrollFolderListScript));
-                        if (!scrollable) break; // everything already fits on screen - nothing more to load
+                        // Not scrollable = everything already fits on screen, nothing more to load. Give
+                        // the page a couple of passes first, since layout may only just have happened.
+                        if (!scrollable)
+                        {
+                            if (pass >= 2) break;
+                            await Task.Delay(ScrollSettleMs, ct);
+                            continue;
+                        }
 
-                        await Task.Delay(ScrollSettleMs, ct);
+                        await WaitForNewRowsAsync(web, signatureBefore, ct);
 
                         var before = merged.Count;
                         var (_, parsed) = ParseFolderItems(await web.ExecuteScriptAsync(ListFolderItemsScript));
@@ -804,8 +904,130 @@ namespace CommandCenter.Services
                     web.NavigationCompleted -= OnNavigationCompleted;
                 }
 
+                if (revealedForScroll && _hiddenController != null)
+                {
+                    _hiddenController.IsVisible = false;
+                    _hiddenController.Bounds = new System.Drawing.Rectangle(0, 0, 1280, 1600);
+                }
+
                 _gate.Release();
             }
+        }
+
+        /// <summary>
+        /// After a scroll step: wait at least ScrollSettleMs, then keep waiting (up to ScrollMaxWaitMs)
+        /// until the rendered rows actually change - Drive's next chunk can take a second or two over
+        /// a slower connection, and the old fixed 500ms wait gave up before it arrived.
+        /// </summary>
+        private static async Task WaitForNewRowsAsync(CoreWebView2 web, string signatureBefore, CancellationToken ct)
+        {
+            await Task.Delay(ScrollSettleMs, ct);
+            var waited = ScrollSettleMs;
+            while (waited < ScrollMaxWaitMs)
+            {
+                if (await web.ExecuteScriptAsync(RowSignatureScript) != signatureBefore) return;
+                await Task.Delay(250, ct);
+                waited += 250;
+            }
+        }
+
+        /// <summary>
+        /// Makes sure the Build Repo root is sorted Name Z->A (newest version first), clicking Drive's
+        /// Name column header until it is - once to switch to Name if it was sorted by date, once more to
+        /// flip direction. Judged from the version numbers actually on screen; after each click it waits
+        /// for the list to really re-render before judging again, so a slow re-sort can't be mistaken
+        /// for "still A->Z" and clicked back. Returns true if it changed the sort.
+        /// </summary>
+        private async Task<bool> EnsureNameDescendingAsync(CoreWebView2 web, CancellationToken ct)
+        {
+            var changed = false;
+            for (var click = 0; click <= MaxSortClicksPerListing; click++)
+            {
+                var (names, ariaSort) = ParseSortState(await web.ExecuteScriptAsync(SortStateScript));
+                var descending = IsVersionDescending(names);
+
+                // Can't tell from the names (no version numbers on screen) - fall back to the header's
+                // own aria-sort if Drive exposes one, otherwise leave it alone rather than guess.
+                descending ??= string.IsNullOrEmpty(ariaSort)
+                    ? (bool?)null
+                    : string.Equals(ariaSort, "descending", StringComparison.OrdinalIgnoreCase);
+
+                if (descending != false) return changed;
+                if (click == MaxSortClicksPerListing) return changed; // gave it every chance - stop
+
+                var clicked = JsonSerializer.Deserialize<string>(await web.ExecuteScriptAsync(ClickNameSortScript));
+                if (string.IsNullOrEmpty(clicked)) return changed;
+                changed = true;
+
+                await WaitForReorderAsync(web, names, ct);
+            }
+            return changed;
+        }
+
+        /// <summary>Polls until the visible row order differs from <paramref name="before"/> (or times out).</summary>
+        private static async Task WaitForReorderAsync(CoreWebView2 web, List<string> before, CancellationToken ct)
+        {
+            var waited = 0;
+            while (waited < SortRerenderTimeoutMs)
+            {
+                await Task.Delay(250, ct);
+                waited += 250;
+                var (now, _) = ParseSortState(await web.ExecuteScriptAsync(SortStateScript));
+                if (now.Count > 0 && !now.Take(5).SequenceEqual(before.Take(5), StringComparer.Ordinal))
+                {
+                    await Task.Delay(300, ct); // let the rest of the list finish rendering
+                    return;
+                }
+            }
+        }
+
+        private static (List<string> Names, string AriaSort) ParseSortState(string json)
+        {
+            try
+            {
+                var inner = JsonSerializer.Deserialize<string>(json) ?? "{}";
+                using var doc = JsonDocument.Parse(inner);
+                var names = new List<string>();
+                if (doc.RootElement.TryGetProperty("names", out var arr) && arr.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var n in arr.EnumerateArray())
+                    {
+                        var text = n.GetString();
+                        if (!string.IsNullOrWhiteSpace(text)) names.Add(text.Trim());
+                    }
+                }
+                var aria = doc.RootElement.TryGetProperty("ariaSort", out var a) ? a.GetString() ?? string.Empty : string.Empty;
+                return (names, aria);
+            }
+            catch (JsonException)
+            {
+                return (new List<string>(), string.Empty);
+            }
+        }
+
+        /// <summary>
+        /// true = version folders read newest-first (v271 before v250), false = oldest-first, null = can't
+        /// tell (fewer than 2 rows with a version number). Uses the same version-number comparison the
+        /// Build Repo tree sorts with, so "v271.4.0" vs "272 Files" is judged by number, not by text.
+        /// </summary>
+        private static bool? IsVersionDescending(List<string> names)
+        {
+            var keys = names
+                .Where(n => !HasFileExtension(n))
+                .Select(BuildRepoDefaults.VersionKey)
+                .Where(k => k.Length > 0)
+                .ToList();
+            if (keys.Count < 2) return null;
+
+            int asc = 0, desc = 0;
+            for (var i = 1; i < keys.Count; i++)
+            {
+                var c = BuildRepoDefaults.CompareVersionKeys(keys[i - 1], keys[i]);
+                if (c < 0) asc++;
+                else if (c > 0) desc++;
+            }
+            if (asc == 0 && desc == 0) return null;
+            return desc > asc;
         }
 
         private static (bool Scrollable, bool AtBottom) ParseScrollResult(string json)

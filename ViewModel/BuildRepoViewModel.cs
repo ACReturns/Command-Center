@@ -1119,7 +1119,7 @@ namespace CommandCenter.ViewModel
                 {
                     case BuildRepoNodeKind.Root:
                     {
-                        var items = await ListCachedAsync(node.DriveId, ct);
+                        var items = await ListCachedAsync(node.DriveId, ct, enforceNewestFirst: true);
                         var versions = items
                             .Where(i => i.IsFolder)
                             .OrderByDescending(i => BuildRepoDefaults.VersionKey(i.Name), Comparer<int[]>.Create(BuildRepoDefaults.CompareVersionKeys))
@@ -1288,10 +1288,10 @@ namespace CommandCenter.ViewModel
             }
         }
 
-        private async Task<List<DriveItem>> ListCachedAsync(string folderId, CancellationToken ct)
+        private async Task<List<DriveItem>> ListCachedAsync(string folderId, CancellationToken ct, bool enforceNewestFirst = false)
         {
             if (_listingCache.TryGetValue(folderId, out var cached)) return cached;
-            var items = await _session.ListFolderItemsAsync(folderId, ct);
+            var items = await _session.ListFolderItemsAsync(folderId, ct, enforceNewestFirst);
             _listingCache[folderId] = items;
             return items;
         }
