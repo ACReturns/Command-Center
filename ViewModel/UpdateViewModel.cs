@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -113,6 +114,58 @@ namespace CommandCenter.ViewModel
             private set => SetProperty(ref _hasProgress, value);
         }
 
+        // ---- What's New (Settings > Updates card, under the startup checkbox) ----
+        // Added/Updates for the latest PUBLISHED build, read from the Confluence page's
+        // "Build Release / Version Updates" section on every successful check. N/A headers are
+        // already dropped by ReleaseNotesParser; a header with nothing left just hides.
+        private string _whatsNewTitle = string.Empty;
+        private IReadOnlyList<string> _whatsNewAdded = Array.Empty<string>();
+        private IReadOnlyList<string> _whatsNewUpdates = Array.Empty<string>();
+
+        public string WhatsNewTitle
+        {
+            get => _whatsNewTitle;
+            private set => SetProperty(ref _whatsNewTitle, value);
+        }
+
+        public IReadOnlyList<string> WhatsNewAdded
+        {
+            get => _whatsNewAdded;
+            private set
+            {
+                if (SetProperty(ref _whatsNewAdded, value))
+                {
+                    OnPropertyChanged(nameof(HasWhatsNewAdded));
+                    OnPropertyChanged(nameof(HasWhatsNew));
+                }
+            }
+        }
+
+        public IReadOnlyList<string> WhatsNewUpdates
+        {
+            get => _whatsNewUpdates;
+            private set
+            {
+                if (SetProperty(ref _whatsNewUpdates, value))
+                {
+                    OnPropertyChanged(nameof(HasWhatsNewUpdates));
+                    OnPropertyChanged(nameof(HasWhatsNew));
+                }
+            }
+        }
+
+        public bool HasWhatsNewAdded => _whatsNewAdded.Count > 0;
+        public bool HasWhatsNewUpdates => _whatsNewUpdates.Count > 0;
+        public bool HasWhatsNew => HasWhatsNewAdded || HasWhatsNewUpdates;
+
+        private void ShowWhatsNew(UpdateCheckResult result)
+        {
+            var notes = result.Notes;
+            WhatsNewAdded = notes?.Added ?? Array.Empty<string>();
+            WhatsNewUpdates = notes?.Updates ?? Array.Empty<string>();
+            WhatsNewTitle = notes == null ? string.Empty : $"What's New  ·  {Describe(result)}";
+        }
+
         public AsyncRelayCommand CheckForUpdatesCommand { get; }
         public AsyncRelayCommand SignInCommand { get; }
         public AsyncRelayCommand ForgetSignInCommand { get; }
@@ -183,6 +236,7 @@ namespace CommandCenter.ViewModel
                 _settingsService.Save(_appSettings);
                 OnPropertyChanged(nameof(LastCheckedDisplay));
                 HasProgress = false;
+                ShowWhatsNew(result);
 
                 switch (result.Status)
                 {
@@ -232,10 +286,12 @@ namespace CommandCenter.ViewModel
                 ? "\n\nNote: this copy is running from a Visual Studio bin folder - the update will be copied there."
                 : string.Empty;
 
+            // What's New is shown in the Settings Updates card (populated before this prompt), not here.
             var answer = MessageBox.Show(Owner(),
                 $"A new version of Maple Central is available.\n\n" +
                 $"Current:   {CurrentVersionDisplay}\nNew:          {Describe(result)}\n" +
                 $"Package:   {result.Package.FileName}\n\n" +
+                $"See \"What's New\" under Settings > Updates for what's changed.\n\n" +
                 $"Install now? Maple Central will close and reopen on its own.{devWarning}",
                 "Update Available", MessageBoxButton.YesNo, MessageBoxImage.Question);
 

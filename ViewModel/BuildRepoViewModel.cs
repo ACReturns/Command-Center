@@ -907,7 +907,7 @@ namespace CommandCenter.ViewModel
 
         public string LocalFilesSummary => LocalFiles.Count == 0
             ? "No files added yet - click Add Files... (you can pick several at once)."
-            : $"{LocalFiles.Count} file(s), {FormatBytes(LocalFiles.Sum(f => f.SizeBytes))} - applied top to bottom. Drag rows (or use ▲/▼) to change the order.";
+            : $"{LocalFiles.Count} file(s), {FormatBytes(LocalFiles.Sum(f => f.SizeBytes))} - applied top to bottom. Drag rows to change the order.";
 
         public RelayCommand AddLocalFilesCommand { get; }
         public RelayCommand ClearLocalFilesCommand { get; }

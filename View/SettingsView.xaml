@@ -330,6 +330,46 @@
                         <Run Text=" you'll be asked before anything is installed; Maple Central then closes, updates, and reopens itself."/>
                         <Run Text=" Your Confluence sign-in is saved on this PC (encrypted to your Windows account), so checks log in automatically."/>
                     </TextBlock>
+
+                    <!-- What's New: Added/Updates for the latest published build, from the Confluence page's
+                         "Build Release / Version Updates" section. Filled on every successful check; hidden
+                         when the page has none (or only N/A). See UpdateViewModel.ShowWhatsNew. -->
+                    <Border Margin="0,10,0,0" Padding="10,8" CornerRadius="4" BorderThickness="1"
+                            BorderBrush="#FFE0C9A6" Background="#FFFFF8EE"
+                            Visibility="{Binding HasWhatsNew, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding WhatsNewTitle}" FontWeight="Bold" FontSize="13"
+                                       Foreground="#FFCC6F00" Margin="0,0,0,6"/>
+
+                            <StackPanel Visibility="{Binding HasWhatsNewAdded, Converter={StaticResource BoolToVis}}" Margin="0,0,0,6">
+                                <TextBlock Text="Added" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                <ItemsControl ItemsSource="{Binding WhatsNewAdded}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="8,1,0,1">
+                                                <TextBlock DockPanel.Dock="Left" Text="•" Margin="0,0,6,0" Foreground="#FF444444"/>
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#FF444444"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding HasWhatsNewUpdates, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="Updates" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                                <ItemsControl ItemsSource="{Binding WhatsNewUpdates}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <DockPanel Margin="8,1,0,1">
+                                                <TextBlock DockPanel.Dock="Left" Text="•" Margin="0,0,6,0" Foreground="#FF444444"/>
+                                                <TextBlock Text="{Binding}" TextWrapping="Wrap" Foreground="#FF444444"/>
+                                            </DockPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

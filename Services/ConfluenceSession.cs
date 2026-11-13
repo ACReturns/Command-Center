@@ -159,6 +159,21 @@ namespace CommandCenter.Services
             }
         }
 
+        /// <summary>
+        /// The page's rendered HTML (REST body.view) - used to read the "Build Release / Version
+        /// Updates" notes for the update dialog. Called right after GetLatestPackageAsync, so the
+        /// cookies are already known-good; no silent refresh here.
+        /// </summary>
+        public async Task<string> GetPageBodyHtmlAsync(string baseUrl, string pageId, CancellationToken ct)
+        {
+            using var client = await CreateClientAsync(baseUrl);
+            var root = baseUrl.TrimEnd('/');
+            var json = await GetJsonAsync(client,
+                $"{root}/rest/api/content/{Uri.EscapeDataString(pageId)}?expand=body.view", ct);
+            using var doc = JsonDocument.Parse(json);
+            return TryGetString(doc.RootElement, "body", "view", "value") ?? string.Empty;
+        }
+
         /// <summary>Streams the package to destinationPath (via a .part file).</summary>
         public async Task DownloadAsync(string baseUrl, RemoteUpdatePackage package, string destinationPath,
             IProgress<(long received, long? total)>? progress, CancellationToken ct)

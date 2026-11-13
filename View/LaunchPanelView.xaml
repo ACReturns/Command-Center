@@ -131,7 +131,7 @@
 
         <StackPanel Visibility="{Binding DebugCommandListEnabled, Converter={StaticResource BoolToVis}}" Margin="0,8,0,0">
             <TextBlock Text="Debug Commands" FontWeight="SemiBold" Margin="0,0,0,2"/>
-            <TextBlock Text="Saved here, then copied into the build folder as cmd_uidebug.txt right before Launch Build runs."
+            <TextBlock Text="Saved here, then copied into the build folder as cmd_uidebug.txt right before Launch Build runs. Drag rows to change the order."
                        Foreground="#FF888888" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
 
             <Border MinHeight="60" MaxHeight="140" Background="White" BorderBrush="#FFB0B0B0" BorderThickness="1">
@@ -139,8 +139,34 @@
                     <TextBlock Text="No debug commands yet. Use Add below."
                                TextWrapping="Wrap" Foreground="#FF888888" Margin="10" VerticalAlignment="Center"
                                Visibility="{Binding HasDebugCommands, Converter={StaticResource InverseBoolToVis}}"/>
+                    <!-- Drag a row to reorder (same feel as Settings' tab cards and Build Repo's local
+                         file list): the dragged row dims and a blue bar on the top/bottom edge of the
+                         row under the cursor shows where it'll land. See LaunchPanelView.xaml.cs. -->
                     <ListBox x:Name="DebugCommandsListBox" ItemsSource="{Binding DebugCommands}" BorderThickness="0" MaxHeight="140"
-                             Visibility="{Binding HasDebugCommands, Converter={StaticResource BoolToVis}}"/>
+                             HorizontalContentAlignment="Stretch" AllowDrop="True"
+                             Visibility="{Binding HasDebugCommands, Converter={StaticResource BoolToVis}}"
+                             PreviewMouseLeftButtonDown="DebugCommands_PreviewMouseLeftButtonDown"
+                             PreviewMouseMove="DebugCommands_PreviewMouseMove"
+                             DragOver="DebugCommands_DragOver"
+                             DragLeave="DebugCommands_DragLeave"
+                             Drop="DebugCommands_Drop">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <!-- DropTop/DropBottom overlay the row so showing one never shifts the layout. -->
+                                <Grid>
+                                    <DockPanel Margin="0,1" Background="Transparent" Cursor="SizeAll">
+                                        <TextBlock DockPanel.Dock="Left" Text="&#xE76F;" FontFamily="Segoe MDL2 Assets" Foreground="#FF999999"
+                                                   VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="Drag to reorder"/>
+                                        <TextBlock Text="{Binding}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                                    </DockPanel>
+                                    <Border x:Name="DropTop" Height="3" VerticalAlignment="Top" Margin="0,-2,0,0"
+                                            Background="#FF1E88E5" IsHitTestVisible="False" Visibility="Collapsed"/>
+                                    <Border x:Name="DropBottom" Height="3" VerticalAlignment="Bottom" Margin="0,0,0,-2"
+                                            Background="#FF1E88E5" IsHitTestVisible="False" Visibility="Collapsed"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
                 </Grid>
             </Border>
 

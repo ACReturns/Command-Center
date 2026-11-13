@@ -27,7 +27,10 @@ namespace CommandCenter.Services
         string? RemoteBuildCode,
         DateTime? RemoteBuildDate,
         string? ArchivePath,
-        string? RemoteAssemblySha256);
+        string? RemoteAssemblySha256,
+        // "Added"/"Updates" for the published build, from the page's Build Release / Version Updates
+        // section. Null when the page has none (or only N/A) or couldn't be read.
+        ReleaseNotes? Notes = null);
 
     /// <summary>
     /// Check / download / install for Maple Central self-updates.
@@ -69,7 +72,8 @@ namespace CommandCenter.Services
             var record = InstalledUpdateRecord.Load(UpdateDefaults.InstalledRecordPath);
             if (record != null && record.PackageIdentity == package.Identity && record.MainAssemblySha256 == localHash)
             {
-                return new UpdateCheckResult(UpdateCheckStatus.UpToDate, package, record.BuildCode, null, null, localHash);
+                var upToDateNotes = await TryGetReleaseNotesAsync(baseUrl, pageId, record.BuildCode, status, ct);
+                return new UpdateCheckResult(UpdateCheckStatus.UpToDate, package, record.BuildCode, null, null, localHash, upToDateNotes);
             }
 
             var archivePath = Path.Combine(UpdateDefaults.DownloadsFolder, CacheFileNameFor(package));
@@ -86,10 +90,14 @@ namespace CommandCenter.Services
             status?.Report("Comparing package contents with this install...");
             var (remoteHash, remoteCode, remoteDate) = await Task.Run(() => InspectArchive(archivePath), ct);
 
+            // Notes for the PUBLISHED build are read on every check (not just when an update is
+            // offered) - Settings' Updates card always shows what the latest release added/changed.
+            var notes = await TryGetReleaseNotesAsync(baseUrl, pageId, remoteCode, status, ct);
+
             if (remoteHash == localHash)
             {
                 SaveRecord(UpdateDefaults.InstalledRecordPath, package, remoteCode, localHash);
-                return new UpdateCheckResult(UpdateCheckStatus.UpToDate, package, remoteCode, remoteDate, archivePath, remoteHash);
+                return new UpdateCheckResult(UpdateCheckStatus.UpToDate, package, remoteCode, remoteDate, archivePath, remoteHash, notes);
             }
 
             var remoteWhen = remoteDate ?? package.Uploaded?.LocalDateTime;
@@ -98,7 +106,27 @@ namespace CommandCenter.Services
                 ? UpdateCheckStatus.LocalIsNewer
                 : UpdateCheckStatus.UpdateAvailable;
 
-            return new UpdateCheckResult(status2, package, remoteCode, remoteDate, archivePath, remoteHash);
+            return new UpdateCheckResult(status2, package, remoteCode, remoteDate, archivePath, remoteHash, notes);
+        }
+
+        // Best-effort: missing/odd notes must never block offering the update itself.
+        private async Task<ReleaseNotes?> TryGetReleaseNotesAsync(string baseUrl, string pageId, string? buildCode,
+            IProgress<string>? status, CancellationToken ct)
+        {
+            try
+            {
+                status?.Report("Reading release notes...");
+                var html = await _confluence.GetPageBodyHtmlAsync(baseUrl, pageId, ct);
+                return ReleaseNotesParser.Parse(html, buildCode);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         /// <summary>

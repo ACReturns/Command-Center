@@ -1351,6 +1351,21 @@ namespace CommandCenter.ViewModel
             PersistDebugCommands();
         }
 
+        // Drag-to-reorder from the Launch panel's Debug Commands list (see LaunchPanelView.xaml.cs).
+        // Index-based on purpose: the list is plain strings and Add doesn't block duplicates, so
+        // moving "by item" could grab the wrong copy. Saves straight away like Add/Edit/Delete -
+        // the order here is the order the lines land in cmd_uidebug.txt.
+        public void MoveDebugCommand(int from, int to)
+        {
+            if (from < 0 || from >= DebugCommands.Count || to < 0 || to >= DebugCommands.Count || from == to)
+            {
+                return;
+            }
+
+            DebugCommands.Move(from, to);
+            PersistDebugCommands();
+        }
+
         // Rewrites this tab's whole cmd_uidebug.txt from DebugCommands, in order - called after
         // every Add/Edit/Delete above so the saved copy under AppPaths.DebugCommandsFileFor never
         // drifts from what's shown in the Launch panel.
